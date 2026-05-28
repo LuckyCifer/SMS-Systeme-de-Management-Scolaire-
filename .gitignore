@@ -77,13 +77,13 @@ frontend/.env.*.local
 Thumbs.db
 
 # ── Anciens fichiers statiques (HTML prototype) ───────
-bootstrap/
-css/
-dist/
-pages/
-lib/
-build/
-plugins/
+/bootstrap/
+/css/
+/dist/
+/pages/
+/lib/
+/build/
+/plugins/
 Accueil.html
 departement.html
 Page-conn.*
