@@ -1,0 +1,42 @@
+[
+  {"model": "api.niveauscolaire", "pk": "CP1_FR",   "fields": {"lib_niveau": "CP1",           "lib_en": "Grade 1",       "type_etab": "PRIMAIRE",   "systeme": "FRANCOPHONE", "ordre": 1}},
+  {"model": "api.niveauscolaire", "pk": "CP2_FR",   "fields": {"lib_niveau": "CP2",           "lib_en": "Grade 2",       "type_etab": "PRIMAIRE",   "systeme": "FRANCOPHONE", "ordre": 2}},
+  {"model": "api.niveauscolaire", "pk": "CE1_FR",   "fields": {"lib_niveau": "CE1",           "lib_en": "Grade 3",       "type_etab": "PRIMAIRE",   "systeme": "FRANCOPHONE", "ordre": 3}},
+  {"model": "api.niveauscolaire", "pk": "CE2_FR",   "fields": {"lib_niveau": "CE2",           "lib_en": "Grade 4",       "type_etab": "PRIMAIRE",   "systeme": "FRANCOPHONE", "ordre": 4}},
+  {"model": "api.niveauscolaire", "pk": "CM1_FR",   "fields": {"lib_niveau": "CM1",           "lib_en": "Grade 5",       "type_etab": "PRIMAIRE",   "systeme": "FRANCOPHONE", "ordre": 5}},
+  {"model": "api.niveauscolaire", "pk": "CM2_FR",   "fields": {"lib_niveau": "CM2",           "lib_en": "Grade 6",       "type_etab": "PRIMAIRE",   "systeme": "FRANCOPHONE", "ordre": 6}},
+
+  {"model": "api.niveauscolaire", "pk": "G1_EN",    "fields": {"lib_niveau": "Grade 1",       "lib_en": "Grade 1",       "type_etab": "PRIMAIRE",   "systeme": "ANGLOPHONE",  "ordre": 1}},
+  {"model": "api.niveauscolaire", "pk": "G2_EN",    "fields": {"lib_niveau": "Grade 2",       "lib_en": "Grade 2",       "type_etab": "PRIMAIRE",   "systeme": "ANGLOPHONE",  "ordre": 2}},
+  {"model": "api.niveauscolaire", "pk": "G3_EN",    "fields": {"lib_niveau": "Grade 3",       "lib_en": "Grade 3",       "type_etab": "PRIMAIRE",   "systeme": "ANGLOPHONE",  "ordre": 3}},
+  {"model": "api.niveauscolaire", "pk": "G4_EN",    "fields": {"lib_niveau": "Grade 4",       "lib_en": "Grade 4",       "type_etab": "PRIMAIRE",   "systeme": "ANGLOPHONE",  "ordre": 4}},
+  {"model": "api.niveauscolaire", "pk": "G5_EN",    "fields": {"lib_niveau": "Grade 5",       "lib_en": "Grade 5",       "type_etab": "PRIMAIRE",   "systeme": "ANGLOPHONE",  "ordre": 5}},
+  {"model": "api.niveauscolaire", "pk": "G6_EN",    "fields": {"lib_niveau": "Grade 6",       "lib_en": "Grade 6",       "type_etab": "PRIMAIRE",   "systeme": "ANGLOPHONE",  "ordre": 6}},
+
+  {"model": "api.niveauscolaire", "pk": "6EME_FR",  "fields": {"lib_niveau": "6ème",          "lib_en": "Form 1",        "type_etab": "SECONDAIRE", "systeme": "FRANCOPHONE", "ordre": 1}},
+  {"model": "api.niveauscolaire", "pk": "5EME_FR",  "fields": {"lib_niveau": "5ème",          "lib_en": "Form 2",        "type_etab": "SECONDAIRE", "systeme": "FRANCOPHONE", "ordre": 2}},
+  {"model": "api.niveauscolaire", "pk": "4EME_FR",  "fields": {"lib_niveau": "4ème",          "lib_en": "Form 3",        "type_etab": "SECONDAIRE", "systeme": "FRANCOPHONE", "ordre": 3}},
+  {"model": "api.niveauscolaire", "pk": "3EME_FR",  "fields": {"lib_niveau": "3ème",          "lib_en": "Form 4",        "type_etab": "SECONDAIRE", "systeme": "FRANCOPHONE", "ordre": 4}},
+  {"model": "api.niveauscolaire", "pk": "2NDE_FR",  "fields": {"lib_niveau": "2nde",          "lib_en": "Lower Sixth",   "type_etab": "SECONDAIRE", "systeme": "FRANCOPHONE", "ordre": 5}},
+  {"model": "api.niveauscolaire", "pk": "1ERE_FR",  "fields": {"lib_niveau": "1ère",          "lib_en": "Upper Sixth",   "type_etab": "SECONDAIRE", "systeme": "FRANCOPHONE", "ordre": 6}},
+  {"model": "api.niveauscolaire", "pk": "TLE_FR",   "fields": {"lib_niveau": "Terminale",     "lib_en": "Upper Sixth",   "type_etab": "SECONDAIRE", "systeme": "FRANCOPHONE", "ordre": 7}},
+
+  {"model": "api.niveauscolaire", "pk": "F1_EN",    "fields": {"lib_niveau": "Form 1",        "lib_en": "Form 1",        "type_etab": "SECONDAIRE", "systeme": "ANGLOPHONE",  "ordre": 1}},
+  {"model": "api.niveauscolaire", "pk": "F2_EN",    "fields": {"lib_niveau": "Form 2",        "lib_en": "Form 2",        "type_etab": "SECONDAIRE", "systeme": "ANGLOPHONE",  "ordre": 2}},
+  {"model": "api.niveauscolaire", "pk": "F3_EN",    "fields": {"lib_niveau": "Form 3",        "lib_en": "Form 3",        "type_etab": "SECONDAIRE", "systeme": "ANGLOPHONE",  "ordre": 3}},
+  {"model": "api.niveauscolaire", "pk": "F4_EN",    "fields": {"lib_niveau": "Form 4",        "lib_en": "Form 4",        "type_etab": "SECONDAIRE", "systeme": "ANGLOPHONE",  "ordre": 4}},
+  {"model": "api.niveauscolaire", "pk": "LS_EN",    "fields": {"lib_niveau": "Lower Sixth",   "lib_en": "Lower Sixth",   "type_etab": "SECONDAIRE", "systeme": "ANGLOPHONE",  "ordre": 5}},
+  {"model": "api.niveauscolaire", "pk": "US_EN",    "fields": {"lib_niveau": "Upper Sixth",   "lib_en": "Upper Sixth",   "type_etab": "SECONDAIRE", "systeme": "ANGLOPHONE",  "ordre": 6}},
+
+  {"model": "api.niveauscolaire", "pk": "L1_SUP",   "fields": {"lib_niveau": "Licence 1",     "lib_en": "Year 1",        "type_etab": "SUPERIEUR",  "systeme": "FRANCOPHONE", "ordre": 1}},
+  {"model": "api.niveauscolaire", "pk": "L2_SUP",   "fields": {"lib_niveau": "Licence 2",     "lib_en": "Year 2",        "type_etab": "SUPERIEUR",  "systeme": "FRANCOPHONE", "ordre": 2}},
+  {"model": "api.niveauscolaire", "pk": "L3_SUP",   "fields": {"lib_niveau": "Licence 3",     "lib_en": "Year 3",        "type_etab": "SUPERIEUR",  "systeme": "FRANCOPHONE", "ordre": 3}},
+  {"model": "api.niveauscolaire", "pk": "M1_SUP",   "fields": {"lib_niveau": "Master 1",      "lib_en": "Year 4",        "type_etab": "SUPERIEUR",  "systeme": "FRANCOPHONE", "ordre": 4}},
+  {"model": "api.niveauscolaire", "pk": "M2_SUP",   "fields": {"lib_niveau": "Master 2",      "lib_en": "Year 5",        "type_etab": "SUPERIEUR",  "systeme": "FRANCOPHONE", "ordre": 5}},
+  {"model": "api.niveauscolaire", "pk": "DOC_SUP",  "fields": {"lib_niveau": "Doctorat",      "lib_en": "PhD",           "type_etab": "SUPERIEUR",  "systeme": "FRANCOPHONE", "ordre": 6}},
+  {"model": "api.niveauscolaire", "pk": "Y1_SUP",   "fields": {"lib_niveau": "Year 1",        "lib_en": "Year 1",        "type_etab": "SUPERIEUR",  "systeme": "ANGLOPHONE",  "ordre": 1}},
+  {"model": "api.niveauscolaire", "pk": "Y2_SUP",   "fields": {"lib_niveau": "Year 2",        "lib_en": "Year 2",        "type_etab": "SUPERIEUR",  "systeme": "ANGLOPHONE",  "ordre": 2}},
+  {"model": "api.niveauscolaire", "pk": "Y3_SUP",   "fields": {"lib_niveau": "Year 3",        "lib_en": "Year 3",        "type_etab": "SUPERIEUR",  "systeme": "ANGLOPHONE",  "ordre": 3}},
+  {"model": "api.niveauscolaire", "pk": "Y4_SUP",   "fields": {"lib_niveau": "Year 4",        "lib_en": "Year 4",        "type_etab": "SUPERIEUR",  "systeme": "ANGLOPHONE",  "ordre": 4}},
+  {"model": "api.niveauscolaire", "pk": "Y5_SUP",   "fields": {"lib_niveau": "Year 5",        "lib_en": "Year 5",        "type_etab": "SUPERIEUR",  "systeme": "ANGLOPHONE",  "ordre": 5}}
+]

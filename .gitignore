@@ -1,0 +1,108 @@
+# ══════════════════════════════════════════════════════
+#  .gitignore — SMS (School Management System)
+#  Django 5 + React 18 / Vite — MySQL
+# ══════════════════════════════════════════════════════
+
+# ── Secrets & configuration sensible ─────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.json
+
+# ── Python / Django ───────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+MANIFEST
+
+# Environnements virtuels
+venv/
+env/
+.venv/
+ENV/
+.Python
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+db.mysql95
+media/
+
+# Coverage / tests
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# ── Node / React / Vite ───────────────────────────────
+node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+.npm
+.eslintcache
+*.tsbuildinfo
+
+# ── IDEs & éditeurs ───────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── Anciens fichiers statiques (HTML prototype) ───────
+bootstrap/
+css/
+dist/
+pages/
+lib/
+build/
+plugins/
+Accueil.html
+departement.html
+Page-conn.*
+Page-login.*
+*.bat
+
+# ── Fichiers de conception (locaux) ──────────────────
+SETUP.txt
+MCD_sms.bcd
+MCD_sms.mcd
+
+# ── Dump SQL brut à la racine (copié dans scripts/) ──
+sms.sql
+
+# ── Contexte IA privé ─────────────────────────────────
+.claude/
+
+# ── Scripts utilitaires locaux ────────────────────────
+Commandes\ de\ démarrage.txt
+backend/check_cols.py
+backend/create_users.py
+backend/import_planning.py
