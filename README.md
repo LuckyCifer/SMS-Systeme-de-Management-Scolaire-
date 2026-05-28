@@ -25,7 +25,22 @@
 
 ## 🖼️ Screenshots
 
-> *Screenshots / demo GIF coming soon.*
+### Login
+![Login page](docs/screenshots/login.png)
+
+### Dashboard
+![Dashboard — statistics overview](docs/screenshots/dashboard.png)
+![Dashboard — charts & recent activity](docs/screenshots/dashboard-charts.png)
+
+### Student & Teacher Management
+![Student registry](docs/screenshots/students.png)
+![Teacher directory](docs/screenshots/teachers.png)
+
+### Timetable (Planning HEBDO)
+![Weekly timetable grid](docs/screenshots/planning.png)
+
+### Grades & Academic Results
+![Grade sheet with averages and mentions](docs/screenshots/grades.png)
 
 ---
 

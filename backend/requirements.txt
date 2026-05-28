@@ -6,3 +6,4 @@ django-filter==25.2
 mysqlclient==2.2.8
 PyJWT==2.12.1
 python-dotenv==1.1.0
+Pillow==12.2.0
