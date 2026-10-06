@@ -4,17 +4,24 @@
 import { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { getUser } from '../utils/Auth';
+import { useEtablissement } from '../hooks/useEtablissement';
+import { etabLabels } from '../utils/etabLabels';
 
 export default function Profile() {
   const { t, toast, theme, toggleTheme, lang, toggleLang } = useApp();
+  const { typeEtab, systeme } = useEtablissement();
+  const labels = etabLabels(typeEtab, systeme, lang);
   const user = getUser();
 
   const ROLE_LABELS = {
     ADMIN:      { label: t.roles.admin,      color: 'badge-danger' },
     SCOLARITE:  { label: t.roles.scolarite,  color: 'badge-info' },
     ENSEIGNANT: { label: t.roles.enseignant, color: 'badge-success' },
-    ETUDIANT:   { label: t.roles.etudiant,   color: 'badge-secondary' },
+    ETUDIANT:   { label: labels.studentLabel, color: 'badge-secondary' },
     COMPTABLE:  { label: t.roles.comptable,  color: 'badge-warning' },
+    CENSEUR:             { label: t.roles.censeur,            color: 'badge-info' },
+    SURVEILLANT_GENERAL: { label: t.roles.surveillantGeneral, color: 'badge-warning' },
+    APEE:                { label: t.roles.apee,               color: 'badge-purple' },
   };
 
   const [pwdForm, setPwdForm] = useState({ current: '', newPwd: '', confirm: '' });
@@ -131,7 +138,7 @@ export default function Profile() {
                     boxShadow: '0 1px 4px rgba(0,0,0,.3)', transition: 'left .3s',
                     display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9,
                   }}>
-                    {isDark ? '🌙' : '☀️'}
+                    <i className={isDark ? 'fas fa-moon' : 'fas fa-sun'}></i>
                   </span>
                 </button>
               </div>
@@ -142,7 +149,7 @@ export default function Profile() {
                   <i className="fas fa-globe" style={{ color: 'var(--green)', width: 16 }}></i>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
-                      {lang === 'fr' ? '🇫🇷 Français' : '🇬🇧 English'}
+                      {lang === 'fr' ? 'Français' : 'English'}
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t.pages.profile.langLabel}</div>
                   </div>

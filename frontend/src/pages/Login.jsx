@@ -50,12 +50,14 @@ export default function Login() {
       // Stocker les infos utilisateur et tokens
       login(
         {
-          login: response.data.login,
-          nom_user: response.data.nom_user,
-          role: response.data.role,
+          login:        response.data.login,
+          nom_user:     response.data.nom_user,
+          role:         response.data.role,
+          type_etab:    response.data.type_etab,
+          etablissement: response.data.etablissement,
         },
         {
-          access: response.data.access,
+          access:  response.data.access,
           refresh: response.data.refresh,
         }
       );
@@ -99,7 +101,7 @@ export default function Login() {
           fontSize:12, fontWeight:700, cursor:'pointer',
           display:'flex', alignItems:'center', gap:6,
         }}>
-          <span>{lang === 'fr' ? '🇫🇷' : '🇬🇧'}</span>
+          <i className="fas fa-globe"></i>
           <span>{lang === 'fr' ? 'FR → EN' : 'EN → FR'}</span>
         </button>
         
@@ -116,7 +118,7 @@ export default function Login() {
             transition:'left .3s',
             display:'flex', alignItems:'center', justifyContent:'center', fontSize:9,
           }}>
-            {isDark ? '🌙' : '☀️'}
+            <i className={isDark ? 'fas fa-moon' : 'fas fa-sun'}></i>
           </span>
         </button>
       </div>
@@ -139,7 +141,7 @@ export default function Login() {
           </h1>
           
           <p style={{ fontSize:13, color:'var(--text-muted)', marginTop:4 }}>
-            Système de Management Scolaire
+            {t.auth.appName}
           </p>
         </div>
 

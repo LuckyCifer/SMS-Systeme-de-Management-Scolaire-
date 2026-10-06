@@ -41,6 +41,7 @@ router.register(r'enseignants',       views.EnseignantViewSet,       basename='e
 router.register(r'utilisateurs',      views.UtilisateurViewSet,      basename='utilisateur')
 router.register(r'tuteurs',           views.TuteurViewSet,           basename='tuteur')
 router.register(r'etudiant-tuteurs',  views.EtudiantTuteurViewSet,   basename='etudiant-tuteur')
+router.register(r'personnel',         views.PersonnelViewSet,        basename='personnel')
 
 # ── Scolarité & Paiements ─────────────────────────────────────────────────────
 router.register(r'tranches',          views.TrancheViewSet,          basename='tranche')
@@ -48,6 +49,7 @@ router.register(r'frais',             views.FraisViewSet,            basename='f
 router.register(r'inscriptions',      views.InscriptionViewSet,      basename='inscription')
 router.register(r'frais-inscription', views.FraisInscriptionViewSet, basename='fraisinscription')
 router.register(r'paiements',         views.PaiementViewSet,         basename='paiement')
+router.register(r'paiements-salaires', views.PaiementSalaireViewSet, basename='paiement-salaire')
 router.register(r'moratoires',        views.MoratoireViewSet,        basename='moratoire')
 router.register(r'factures',          views.FactureViewSet,          basename='facture')
 router.register(r'factures-detail',   views.FactureDetailViewSet,    basename='facture-detail')
@@ -71,8 +73,10 @@ router.register(r'absences',          views.AbsenceViewSet,          basename='a
 
 # ── Gestion interne ───────────────────────────────────────────────────────────
 router.register(r'examens',           views.ExamenViewSet,           basename='examen')
+router.register(r'epreuves',          views.EpreuveViewSet,          basename='epreuve')
 router.register(r'convocations',      views.ConvocationViewSet,      basename='convocation')
 router.register(r'rapports-stat',     views.RapportStatistiqueViewSet, basename='rapport-stat')
+router.register(r'rapports-assiduite', views.RapportAssiduiteViewSet,  basename='rapport-assiduite')
 
 # ── Documents avancés ─────────────────────────────────────────────────────────
 router.register(r'decisions',         views.DecisionViewSet,         basename='decision')
@@ -98,4 +102,11 @@ urlpatterns = [
     path('api/auth/verify/',    TokenVerifyView.as_view(),    name='token_verify'),
     path('api/auth/sms-login/',  views.SmsLoginView.as_view(),  name='sms_login'),
     path('api/auth/sms-logout/', views.SmsLogoutView.as_view(), name='sms_logout'),
+    path('api/envoi-email/',      views.EnvoiEmailView.as_view(),    name='envoi_email'),
+    path('api/dashboard/stats/', views.DashboardStatsView.as_view(), name='dashboard_stats'),
+    # ── Import CSV ──────────────────────────────────────────────────────────────
+    path('api/import-csv/<str:entity_type>/',
+         views.ImportCsvView.as_view(), name='import_csv'),
+    path('api/import-csv/<str:entity_type>/template/',
+         views.ImportCsvTemplateView.as_view(), name='import_csv_template'),
 ]

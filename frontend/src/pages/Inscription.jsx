@@ -2,17 +2,20 @@ import { useState, useCallback, useEffect } from 'react';
 import { CrudTable, FormField } from '../components/CrudTable';
 import AutocompleteField from '../components/AutocompleteField';
 import { useApp } from '../context/AppContext';
+import { usePdfPreview } from '../context/PdfPreviewContext';
 import { useApi, useMutation } from '../hooks/useApi';
 import { inscriptionService, paiementService, etudiantService, classeService } from '../services/endpoints';
 import { LoadingState, ErrorState } from '../components/ApiState';
 import { generateRecu } from '../services/pdfService';
 import api from '../services/api';
+import { useEtablissement } from '../hooks/useEtablissement';
+import { etabLabels } from '../utils/etabLabels';
 
 const SP_STYLE = { PAYE:'badge-success', PARTIEL:'badge-warning', EN_ATTENTE:'badge-danger' };
 const SP_LABEL = { PAYE:'Payé', PARTIEL:'Partiel', EN_ATTENTE:'En attente' };
 
 // ── Formulaire Inscription + Paiement simultané ───────────────────────────────
-function Form({ item, onClose, onSave }) {
+function Form({ item, onClose, onSave, labels }) {
   const { t } = useApp();
   const isEdit = Boolean(item?.code_inscription);
   // Afficher le bloc paiement si création OU si la situation n'est pas soldée
@@ -80,7 +83,7 @@ function Form({ item, onClose, onSave }) {
         </div>
         <div className="sms-form-row">
           <AutocompleteField
-            label={t.fields.mleEtud} name="mle_etudiant" value={f.mle_etudiant} onChange={ch} required
+            label={labels?.studentLabel || t.fields.mleEtud} name="mle_etudiant" value={f.mle_etudiant} onChange={ch} required
             service={etudiantService}
             labelFn={e => `${e.nom} ${e.prenom || ''} — ${e.mle_etudiant}`}
             valueFn={e => e.mle_etudiant}
@@ -101,9 +104,9 @@ function Form({ item, onClose, onSave }) {
             value={f.code_annee} onChange={ch}
             placeholder={anneeEnCours || 'ex: 2025-2026'} />
           <FormField label={t.fields.dateInscription} name="date_inscription"
-            type="date" value={f.date_inscription} onChange={ch} />
+            type="date" value={f.date_inscription} onChange={ch} help="Format : JJ/MM/AAAA" />
           <FormField label={t.fields.inscriptionFrais} name="mt_inscription"
-            type="number" value={f.mt_inscription} onChange={ch} />
+            type="number" value={f.mt_inscription} onChange={ch} placeholder="Ex : 150 000" />
         </div>
       </div>
 
@@ -140,10 +143,10 @@ function Form({ item, onClose, onSave }) {
               ]} />
             <FormField label={t.fields.montantRecu} name="mt_paye"
               type="number" value={f.mt_paye} onChange={ch}
-              disabled={f.statut_paiement === 'EN_ATTENTE'} />
+              disabled={f.statut_paiement === 'EN_ATTENTE'} placeholder="Ex : 75 000" />
             <FormField label={t.fields.date} name="date_paiement"
               type="date" value={f.date_paiement} onChange={ch}
-              disabled={f.statut_paiement === 'EN_ATTENTE'} />
+              disabled={f.statut_paiement === 'EN_ATTENTE'} help="Format : JJ/MM/AAAA" />
           </div>
           <FormField label={t.fields.obs} name="obs_paiement"
             value={f.obs_paiement} onChange={ch}
@@ -166,9 +169,61 @@ function Form({ item, onClose, onSave }) {
 
 // ── Page principale ───────────────────────────────────────────────────────────
 export default function Inscription() {
-  const { t, toast, user } = useApp();
-  const { data, loading, error, reload } =
-    useApi(() => inscriptionService.list({ page_size: 50 }));
+  const { t, toast, user, anneeActive, lang } = useApp();
+  const { showPreview } = usePdfPreview();
+  const { typeEtab, systeme } = useEtablissement();
+  const labels = etabLabels(typeEtab, systeme, lang);
+
+  const [depFilter,    setDepFilter]    = useState('');
+  const [spFilter,     setSpFilter]     = useState('');
+  const [departements, setDepartements] = useState([]);
+  const [specialites,  setSpecialites]  = useState([]);
+  const [filteredSp,   setFilteredSp]   = useState([]);
+
+  useEffect(() => {
+    Promise.all([
+      api.get('/api/departements/?page_size=100'),
+      api.get('/api/specialites/?page_size=200'),
+    ]).then(([dR, sR]) => {
+      setDepartements(dR.data.results ?? dR.data);
+      const sps = sR.data.results ?? sR.data;
+      setSpecialites(sps);
+      setFilteredSp(sps);
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!depFilter) {
+      setFilteredSp(specialites);
+      setSpFilter('');
+    } else {
+      const f = specialites.filter(s => {
+        const d = typeof s.code_dep === 'object' ? s.code_dep?.code_dep : s.code_dep;
+        return d === depFilter;
+      });
+      setFilteredSp(f);
+      if (spFilter && !f.some(s => s.code_sp === spFilter)) setSpFilter('');
+    }
+  }, [depFilter, specialites]);
+
+  const { data: statsData, loading: statsLoading } = useApi(
+    () => inscriptionService.stats({
+      ...(anneeActive ? { code_annee: anneeActive.code_annee } : {}),
+      ...(depFilter   ? { code_dep:   depFilter   } : {}),
+      ...(spFilter    ? { code_sp:    spFilter    } : {}),
+    }),
+    [anneeActive, depFilter, spFilter]
+  );
+
+  const { data, count, loading, error, reload } = useApi(
+    () => inscriptionService.list({
+      page_size: 50,
+      ...(anneeActive ? { code_annee: anneeActive.code_annee } : {}),
+      ...(depFilter   ? { code_dep:   depFilter   } : {}),
+      ...(spFilter    ? { code_sp:    spFilter    } : {}),
+    }),
+    [anneeActive, depFilter, spFilter]
+  );
 
   const { mutate: createInsc } = useMutation(
     useCallback(d => inscriptionService.create(d), [])
@@ -202,7 +257,8 @@ export default function Inscription() {
       const p = [...paiements].sort((a, b) => b.code_paiement - a.code_paiement)[0];
 
       if (!p) { toast.error('Reçu introuvable.'); return; }
-      await generateRecu(p, user);
+      const { blob, filename } = await generateRecu(p, user);
+      showPreview(blob, filename);
       toast.success(t.toast.exported);
     } catch {
       toast.error(t.toast.error);
@@ -240,11 +296,16 @@ export default function Inscription() {
 
   const COLS = [
     { accessor: 'code_inscription', label: t.fields.noInscription },
-    { key:'etud', label: t.fields.mleEtud, render: r => r.mle_etudiant?.mle_etudiant || r.mle_etudiant },
-    { key:'nom',  label: t.fields.nomEtud, bold: true,
+    { key:'etud', label: t.fields.matricule, render: r => r.mle_etudiant?.mle_etudiant || r.mle_etudiant },
+    { key:'nom',  label: labels.studentLabel, bold: true,
       render: r => r.nom_etudiant || r.mle_etudiant?.nom || '—' },
     { key:'cls',  label: t.fields.classe,
       render: r => r.lib_classe || r.code_classe?.code_classe || r.code_classe },
+    { key:'niv',  label: t.fields.niveau,
+      render: r => r.lib_niv_scolaire
+        ? <span className="sms-badge badge-secondary" style={{ fontSize: 10 }}>{r.lib_niv_scolaire}</span>
+        : <span style={{ color: 'var(--text-muted)' }}>—</span>
+    },
     { key:'ann',  label: t.fields.annee,
       render: r => r.lib_annee  || r.code_annee?.code_annee   || r.code_annee },
     { key:'date', label: t.fields.date,
@@ -283,10 +344,10 @@ export default function Inscription() {
   if (loading) return <LoadingState />;
   if (error)   return <ErrorState message={error} onRetry={reload} />;
 
-  const nbPayes    = (data || []).filter(d => d.statut_paiement === 'PAYE').length;
-  const nbPartiels = (data || []).filter(d => d.statut_paiement === 'PARTIEL').length;
-  const nbAttente  = (data || []).filter(d => d.statut_paiement === 'EN_ATTENTE').length;
-  const totalRecu  = (data || []).reduce((s, d) => s + Number(d.mt_paye_inscription || 0), 0);
+  const nbPayes    = statsLoading ? '…' : (statsData?.nb_payes    ?? 0);
+  const nbPartiels = statsLoading ? '…' : (statsData?.nb_partiels ?? 0);
+  const nbAttente  = statsLoading ? '…' : (statsData?.nb_attente  ?? 0);
+  const totalRecu  = statsLoading ? 0   : (statsData?.total_recu  ?? 0);
 
   return (
     <div>
@@ -319,7 +380,39 @@ export default function Inscription() {
         icon="fas fa-file-signature"
         columns={COLS}
         data={data || []}
+        totalCount={count}
         addLabel={t.pages.inscriptions.addLabel}
+        exportCsvUrl={`/api/inscriptions/export-csv/${[depFilter && `code_dep=${depFilter}`, spFilter && `code_sp=${spFilter}`].filter(Boolean).join('&') ? '?' + [depFilter && `code_dep=${depFilter}`, spFilter && `code_sp=${spFilter}`].filter(Boolean).join('&') : ''}`}
+        filters={
+          <div className="flex gap-2 items-center" style={{ flexWrap: 'wrap' }}>
+            {/* Filière/Spécialité — supérieur uniquement */}
+            {labels.isSuperieur && <>
+              <select className="sms-input" style={{ height: 34, minWidth: 180, fontSize: 12 }}
+                value={depFilter} onChange={e => setDepFilter(e.target.value)}>
+                <option value="">{labels.allDepsLabel}</option>
+                {departements.map(d => <option key={d.code_dep} value={d.code_dep}>{d.lib_dep}</option>)}
+              </select>
+              <select className="sms-input" style={{ height: 34, minWidth: 180, fontSize: 12 }}
+                value={spFilter} onChange={e => setSpFilter(e.target.value)} disabled={!depFilter}>
+                <option value="">{t.common.allSp}</option>
+                {filteredSp.map(s => <option key={s.code_sp} value={s.code_sp}>{s.lib_sp}</option>)}
+              </select>
+            </>}
+            {/* Série / Section — secondaire uniquement */}
+            {labels.isSecondaire && (
+              <select className="sms-input" style={{ height: 34, minWidth: 200, fontSize: 12 }}
+                value={depFilter} onChange={e => setDepFilter(e.target.value)}>
+                <option value="">{labels.allDepsLabel}</option>
+                {departements.map(d => <option key={d.code_dep} value={d.code_dep}>{d.lib_dep}</option>)}
+              </select>
+            )}
+            {(depFilter || spFilter) && (
+              <button className="sms-btn-icon" onClick={() => { setDepFilter(''); setSpFilter(''); }} title={t.common.reset}>
+                <i className="fas fa-times"></i>
+              </button>
+            )}
+          </div>
+        }
         onAdd={handleAdd}
         onEdit={async d => {
           try {
@@ -347,7 +440,7 @@ export default function Inscription() {
           try { await removeInsc(d); toast.success(t.toast.deleted); reload(); }
           catch (e) { toast.error(e.message); }
         }}
-        renderForm={p => <Form {...p} />}
+        renderForm={p => <Form {...p} labels={labels} />}
       />
     </div>
   );

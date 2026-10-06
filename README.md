@@ -13,7 +13,7 @@
 [![JWT](https://img.shields.io/badge/Auth-JWT-000000?style=flat&logo=jsonwebtokens&logoColor=white)](https://jwt.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-[Features](#-features) · [Tech Stack](#-tech-stack) · [Getting Started](#-getting-started) · [Architecture](#-architecture) · [Author](#-author)
+[Features](#-features) · [Tech Stack](#-tech-stack) · [Getting Started](#-getting-started) · [Architecture](#-architecture) · [API Documentation](#-api-documentation) · [Deployment](#-deployment) · [Author](#-author)
 
 ---
 
@@ -229,6 +229,87 @@ SMS-Systeme-de-Management-Scolaire-/
 ## 📐 Architecture
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for a detailed description of the data models, API endpoints, and JWT authentication flow.
+
+---
+
+## 📖 API Documentation
+
+The API schema is generated automatically from the DRF ViewSets/serializers (`drf-spectacular`) — it stays in sync with the code, no hand-maintained doc to go stale.
+
+| UI | URL |
+|---|---|
+| Swagger UI (interactive, try-it-out) | `/api/docs/` |
+| ReDoc (read-only, cleaner for reference) | `/api/redoc/` |
+| Raw OpenAPI 3 schema (YAML/JSON) | `/api/schema/` |
+
+Locally, once the backend is running: [http://localhost:8000/api/docs/](http://localhost:8000/api/docs/).
+
+For the narrative version (data model diagrams, auth flow, multi-institution isolation), see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) instead — the two are complementary.
+
+---
+
+## 🚢 Deployment
+
+### Backend (Django)
+
+1. Provision a MySQL 8+ database and a server able to run Python 3.11 (a plain Linux VPS, or any PaaS that reads a `Procfile` — Render, Railway, and similar all work; one is included at `backend/Procfile`).
+2. Copy `.env.example` to `.env` and set **production** values — at minimum:
+   - `SECRET_KEY` — generate one: `python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"`
+   - `DEBUG=False`
+   - `ALLOWED_HOSTS` — your API domain(s)
+   - `CORS_ALLOWED_ORIGINS` — your frontend domain(s)
+   - `DB_*` — production database credentials
+   - `EMAIL_*` — real SMTP credentials, if convocations/receipts should send actual emails (defaults to printing to the console otherwise)
+3. Install dependencies, migrate, collect static files:
+   ```bash
+   pip install -r requirements.txt
+   python manage.py migrate
+   python manage.py collectstatic --noinput
+   ```
+4. Run with a production WSGI server — not `manage.py runserver`:
+   ```bash
+   # Linux
+   gunicorn sms_backend.wsgi:application --bind 0.0.0.0:8000
+   # Windows (gunicorn has no fork() support there)
+   waitress-serve --port=8000 sms_backend.wsgi:application
+   ```
+5. Put a reverse proxy in front for TLS termination and to serve `static/`/`media/` directly:
+   ```nginx
+   server {
+       listen 443 ssl;
+       server_name api.sms.example.cm;
+
+       location /static/ { alias /path/to/backend/staticfiles/; }
+       location /media/  { alias /path/to/backend/media/; }
+
+       location / {
+           proxy_pass http://127.0.0.1:8000;
+           proxy_set_header Host $host;
+           proxy_set_header X-Forwarded-Proto $scheme;
+       }
+   }
+   ```
+   If the proxy terminates TLS, set `BEHIND_HTTPS_PROXY=True` in `.env` so Django trusts `X-Forwarded-Proto` — otherwise leave it unset.
+
+### Frontend (React)
+
+```bash
+cd frontend
+npm install
+cp .env.example .env    # set VITE_API_URL to the backend's public URL first
+npm run build            # outputs static files to dist/
+```
+
+`VITE_API_URL` is baked in at build time, not read at runtime — set it **before** running `npm run build`, not after. Serve `dist/` from the same reverse proxy (or any static host/CDN).
+
+### Before going live
+
+- [ ] `DEBUG=False`
+- [ ] Real `SECRET_KEY` from the environment, not the dev fallback
+- [ ] `ALLOWED_HOSTS` / `CORS_ALLOWED_ORIGINS` restricted to real domains
+- [ ] HTTPS enforced (`SECURE_SSL_REDIRECT=True`, HSTS settings)
+- [ ] Database credentials rotated from the dev defaults
+- [ ] `python manage.py test` passes
 
 ---
 

@@ -6,19 +6,25 @@ import api from '../services/api';
 import { CrudTable, FormField } from '../components/CrudTable';
 import { useApp } from '../context/AppContext';
 import { useApi, useMutation } from '../hooks/useApi';
-import { factureService } from '../services/endpoints';
+import { factureService, anneeService } from '../services/endpoints';
 import { LoadingState, ErrorState } from '../components/ApiState';
+import { useEtablissement } from '../hooks/useEtablissement';
+import { etabLabels } from '../utils/etabLabels';
+
+const PAGE_SIZE = 50;
 
 const STATUT_VALUE_COLORS = {
-  EN_ATTENTE: 'badge-secondary',
-  PARTIELLEMENT_PAYE: 'badge-warning',
-  SOLDEE: 'badge-success',
-  ANNULEE: 'badge-danger',
+  EN_ATTENTE:          'badge-secondary',
+  PARTIELLEMENT_PAYEE: 'badge-warning',
+  SOLDEE:              'badge-success',
+  ANNULEE:             'badge-danger',
 };
 
 // ── Vue détaillée d'une facture ───────────────────────────────────────────────
 function DetailModal({ facture, onClose }) {
-  const { t } = useApp();
+  const { t, lang } = useApp();
+  const { typeEtab, systeme } = useEtablissement();
+  const labels = etabLabels(typeEtab, systeme, lang);
   const [detail, setDetail] = useState(null);
   const [loading, setLoad]  = useState(true);
 
@@ -46,7 +52,7 @@ function DetailModal({ facture, onClose }) {
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16,
                 padding:12, background:'var(--bg-darkest)', borderRadius:8 }}>
                 <div>
-                  <div style={{ fontSize:10, color:'var(--text-muted)', fontWeight:600 }}>{t.fields.nomEtud.toUpperCase()}</div>
+                  <div style={{ fontSize:10, color:'var(--text-muted)', fontWeight:600 }}>{labels.studentLabel.toUpperCase()}</div>
                   <div style={{ fontWeight:700 }}>{detail.nom_etudiant || detail.mle_etudiant}</div>
                 </div>
                 <div>
@@ -118,47 +124,62 @@ function DetailModal({ facture, onClose }) {
 
 // ── Formulaire ────────────────────────────────────────────────────────────────
 function Form({ item, onClose, onSave }) {
-  const { t } = useApp();
-  const [etudiants, setEts] = useState([]);
-  const [loading, setLoad]  = useState(true);
+  const { t, lang } = useApp();
+  const { typeEtab, systeme } = useEtablissement();
+  const labels = etabLabels(typeEtab, systeme, lang);
+  const [etudiants, setEts]   = useState([]);
+  const [annees,    setAnnees] = useState([]);
+  const [loading, setLoad]    = useState(true);
   const [f, setF] = useState({
     numero_facture: item?.numero_facture || `FAC-${new Date().getFullYear()}-${String(Math.floor(Math.random()*9000)+1000)}`,
-    mle_etudiant:   item?.mle_etudiant || '',
-    code_annee:     item?.code_annee   || '2025-2026',
+    mle_etudiant:   item?.mle_etudiant?.mle_etudiant || item?.mle_etudiant || '',
+    code_annee:     item?.code_annee?.code_annee     || item?.code_annee   || '',
     montant_total:  item?.montant_total || 0,
     montant_paye:   item?.montant_paye  || 0,
     statut:         item?.statut       || 'EN_ATTENTE',
     observations:   item?.observations || '',
   });
   useEffect(() => {
-    api.get('/api/etudiants/?page_size=200').then(r => setEts(r.data.results ?? r.data)).finally(() => setLoad(false));
+    Promise.all([
+      api.get('/api/etudiants/?page_size=200'),
+      api.get('/api/annees/?page_size=20'),
+    ]).then(([eR, aR]) => {
+      setEts(eR.data.results ?? eR.data);
+      setAnnees(aR.data.results ?? aR.data);
+    }).finally(() => setLoad(false));
   }, []);
   const ch = e => setF(p => ({ ...p, [e.target.name]: e.target.value }));
   if (loading) return <div style={{ padding:40, textAlign:'center' }}><div className="sms-spinner" style={{ width:32, height:32, margin:'auto' }}></div></div>;
 
   const STATUTS = [
-    { value:'EN_ATTENTE',         label: t.status.enAttente },
-    { value:'PARTIELLEMENT_PAYE', label: t.status.partPaye },
-    { value:'SOLDEE',             label: t.status.soldee },
-    { value:'ANNULEE',            label: t.status.annulee },
+    { value:'EN_ATTENTE',          label: t.status.enAttente },
+    { value:'PARTIELLEMENT_PAYEE', label: t.status.partPaye },
+    { value:'SOLDEE',              label: t.status.soldee },
+    { value:'ANNULEE',             label: t.status.annulee },
   ];
 
   return (
     <form onSubmit={e => { e.preventDefault(); onSave(f); }}>
       <div className="sms-form-row">
-        <FormField label={`${t.fields.numeroFact} *`} name="numero_facture" value={f.numero_facture} onChange={ch} required />
-        <FormField label={`${t.fields.annee} *`}      name="code_annee"     value={f.code_annee}     onChange={ch} required />
+        <FormField label={`${t.fields.numeroFact} *`} name="numero_facture" value={f.numero_facture} onChange={ch} required placeholder="Ex : FACT-2026-001" />
+        <div className="sms-form-group">
+          <label className="sms-label">{t.fields.annee} *</label>
+          <select className="sms-input" name="code_annee" value={f.code_annee} onChange={ch} required>
+            <option value="">{t.common.select}</option>
+            {annees.map(a => <option key={a.code_annee} value={a.code_annee}>{a.lib_annee || a.code_annee}</option>)}
+          </select>
+        </div>
       </div>
       <div className="sms-form-group">
-        <label className="sms-label">{t.fields.nomEtud} *</label>
+        <label className="sms-label">{labels.studentLabel} *</label>
         <select className="sms-input" name="mle_etudiant" value={f.mle_etudiant} onChange={ch} required>
           <option value="">{t.common.select}</option>
           {etudiants.map(e => <option key={e.mle_etudiant} value={e.mle_etudiant}>{e.nom} {e.prenom||''} ({e.mle_etudiant})</option>)}
         </select>
       </div>
       <div className="sms-form-row">
-        <FormField label={`${t.fields.montantTotal} *`} name="montant_total" type="number" value={f.montant_total} onChange={ch} required />
-        <FormField label={t.fields.montantPaye}          name="montant_paye"  type="number" value={f.montant_paye}  onChange={ch} />
+        <FormField label={`${t.fields.montantTotal} *`} name="montant_total" type="number" value={f.montant_total} onChange={ch} required placeholder="Ex : 150 000" />
+        <FormField label={t.fields.montantPaye}          name="montant_paye"  type="number" value={f.montant_paye}  onChange={ch} placeholder="Ex : 75 000" />
         <div className="sms-form-group">
           <label className="sms-label">{t.fields.statut}</label>
           <select className="sms-input" name="statut" value={f.statut} onChange={ch}>
@@ -177,21 +198,49 @@ function Form({ item, onClose, onSave }) {
 
 // ── Page principale ───────────────────────────────────────────────────────────
 export default function Factures() {
-  const { t, toast } = useApp();
-  const [detailModal, setDetailModal] = useState(null);
+  const { t, toast, anneeActive, lang } = useApp();
+  const { typeEtab, systeme } = useEtablissement();
+  const labels = etabLabels(typeEtab, systeme, lang);
+  const [detailModal,   setDetailModal]   = useState(null);
+  const [page,          setPage]          = useState(1);
+  const [statsData,     setStatsData]     = useState(null);
+  const [statsLoading,  setStatsLoading]  = useState(true);
+  const [statsVersion,  setStatsVersion]  = useState(0);
+  const reloadStats = useCallback(() => setStatsVersion(v => v + 1), []);
 
-  const { data, loading, error, reload } = useApi(() => factureService.list({ page_size: 100 }));
+  useEffect(() => { setPage(1); }, [anneeActive?.code_annee]);
+
+  useEffect(() => {
+    let active = true;
+    setStatsLoading(true);
+    const params = anneeActive ? { code_annee: anneeActive.code_annee } : {};
+    factureService.stats(params)
+      .then(r => { if (active) setStatsData(r.data); })
+      .catch(() => {})
+      .finally(() => { if (active) setStatsLoading(false); });
+    return () => { active = false; };
+  }, [anneeActive, statsVersion]);
+
+  const { data, count, loading, error, reload } = useApi(
+    () => factureService.list({
+      page,
+      page_size: PAGE_SIZE,
+      ...(anneeActive ? { code_annee: anneeActive.code_annee } : {}),
+    }),
+    [anneeActive, page]
+  );
   const { mutate: create } = useMutation(useCallback(d => factureService.create(d), []));
   const { mutate: update } = useMutation(useCallback(d => factureService.update(d.code_facture, d), []));
   const { mutate: remove } = useMutation(useCallback(d => factureService.delete(d.code_facture), []));
 
-  const totalDu   = (data||[]).reduce((s,f) => s + Number(f.montant_total||0), 0);
-  const totalPaye = (data||[]).reduce((s,f) => s + Number(f.montant_paye||0), 0);
-  const totalRest = totalDu - totalPaye;
+  const totalDu   = statsLoading ? 0 : (statsData?.total_du    || 0);
+  const totalPaye = statsLoading ? 0 : (statsData?.total_paye  || 0);
+  const totalRest = statsLoading ? 0 : (statsData?.total_restant || 0);
+  const totalPages = count ? Math.ceil(count / PAGE_SIZE) : 1;
 
   const COLS = [
     { accessor:'numero_facture', label: t.fields.numeroFact, bold:true },
-    { key:'etud',     label: t.fields.nomEtud,     render:r => r.nom_etudiant || r.mle_etudiant },
+    { key:'etud',     label: labels.studentLabel,     render:r => r.nom_etudiant || r.mle_etudiant },
     { accessor:'code_annee', label: t.fields.annee },
     { key:'total',    label: t.common.totalDue,    render:r => <span style={{ color:'var(--text-primary)', fontWeight:700 }}>{Number(r.montant_total||0).toLocaleString()} FCFA</span> },
     { key:'paye',     label: t.fields.payes,        render:r => <span style={{ color:'var(--green)', fontWeight:600 }}>{Number(r.montant_paye||0).toLocaleString()} FCFA</span> },
@@ -221,7 +270,7 @@ export default function Factures() {
           { label: t.common.totalDue,       value:totalDu.toLocaleString()+' FCFA',   color:'c-blue',   icon:'fas fa-file-invoice-dollar' },
           { label: t.common.totalCollected, value:totalPaye.toLocaleString()+' FCFA', color:'c-green',  icon:'fas fa-check-circle' },
           { label: t.common.balance,        value:totalRest.toLocaleString()+' FCFA', color: totalRest > 0 ? 'c-red' : 'c-green', icon:'fas fa-balance-scale' },
-          { label: t.pages.factures.title,  value:(data||[]).length,                   color:'c-orange', icon:'fas fa-file-alt' },
+          { label: t.pages.factures.title,  value: statsLoading ? '…' : (statsData?.nb_factures ?? count ?? 0), color:'c-orange', icon:'fas fa-file-alt' },
         ].map(s => (
           <div className={`stat-card ${s.color}`} key={s.label}>
             <div className={`stat-icon ${s.color}`}><i className={s.icon}></i></div>
@@ -234,11 +283,34 @@ export default function Factures() {
         title={t.pages.factures.title} subtitle={t.pages.factures.subtitle} icon="fas fa-file-invoice"
         sortBy={r => r.nom_etudiant || r.mle_etudiant || ''}
         columns={COLS} data={data||[]} addLabel={t.pages.factures.addLabel}
-        onAdd={async d => { try { await create(d); toast.success(t.toast.saved); reload(); } catch(e){ toast.error(e.message); } }}
-        onEdit={async d => { try { await update(d); toast.success(t.toast.updated); reload(); } catch(e){ toast.error(e.message); } }}
-        onDelete={async d => { try { await remove(d); toast.success(t.toast.deleted); reload(); } catch(e){ toast.error(e.message); } }}
+        totalCount={count}
+        onAdd={async d => { try { await create(d); toast.success(t.toast.saved); reload(); reloadStats(); } catch(e){ toast.error(e.message); } }}
+        onEdit={async d => { try { await update(d); toast.success(t.toast.updated); reload(); reloadStats(); } catch(e){ toast.error(e.message); } }}
+        onDelete={async d => { try { await remove(d); toast.success(t.toast.deleted); reload(); reloadStats(); } catch(e){ toast.error(e.message); } }}
         renderForm={p => <Form {...p} />}
       />
+
+      {totalPages > 1 && (
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:12, padding:'0 4px' }}>
+          <span style={{ fontSize:12, color:'var(--text-muted)' }}>
+            Page {page} / {totalPages} &mdash; {count} résultats
+          </span>
+          <div style={{ display:'flex', gap:6 }}>
+            <button className="sms-btn sms-btn-outline sms-btn-sm" onClick={() => setPage(1)} disabled={page === 1}>
+              <i className="fas fa-angle-double-left"></i>
+            </button>
+            <button className="sms-btn sms-btn-outline sms-btn-sm" onClick={() => setPage(p => Math.max(1, p-1))} disabled={page === 1}>
+              <i className="fas fa-chevron-left"></i> Préc.
+            </button>
+            <button className="sms-btn sms-btn-outline sms-btn-sm" onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page === totalPages}>
+              Suiv. <i className="fas fa-chevron-right"></i>
+            </button>
+            <button className="sms-btn sms-btn-outline sms-btn-sm" onClick={() => setPage(totalPages)} disabled={page === totalPages}>
+              <i className="fas fa-angle-double-right"></i>
+            </button>
+          </div>
+        </div>
+      )}
 
       {detailModal && <DetailModal facture={detailModal} onClose={() => setDetailModal(null)} />}
     </>

@@ -14,6 +14,7 @@ function getT() {
 
 export function useApi(fetchFn, deps = []) {
   const [data,    setData]    = useState(null);
+  const [count,   setCount]   = useState(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState(null);
 
@@ -44,6 +45,7 @@ export function useApi(fetchFn, deps = []) {
       clearTimeout(timeoutId);
       initialRef.current = false;
       setData(res.data?.results ?? res.data ?? []);
+      setCount(res.data?.count ?? null);
       setError(null);
     } catch (err) {
       clearTimeout(timeoutId);
@@ -68,7 +70,7 @@ export function useApi(fetchFn, deps = []) {
     };
   }, [load]);
 
-  return { data, loading, error, reload: load };
+  return { data, count, loading, error, reload: load };
 }
 
 export function useMutation(mutateFn) {

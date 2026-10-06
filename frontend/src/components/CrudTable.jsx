@@ -2,13 +2,32 @@
  * components/CrudTable.jsx
  * Tableau CRUD avec :
  * - Sélection multiple + bulk delete
- * - Bouton export CSV
+ * - Export CSV/Excel
  * - Filtres avancés
- * - Pagination améliorée
+ * - Pagination
+ * - Colonnes masquables (P3)
+ * - Skeleton loading (P4)
  */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import SearchableSelect from './SearchableSelect';
+import EmptyState from './EmptyState';
+
+/* ── Skeleton row ─────────────────────────────────────────────────── */
+function SkeletonRows({ colCount, rowCount = 8 }) {
+  return Array.from({ length: rowCount }).map((_, i) => (
+    <tr key={i} style={{ opacity: 1 - i * 0.08 }}>
+      {Array.from({ length: colCount }).map((_, j) => (
+        <td key={j} style={{ padding: '12px 16px' }}>
+          <div
+            className="skeleton"
+            style={{ height: 13, width: j === 0 ? '60%' : j % 3 === 0 ? '45%' : '75%', borderRadius: 4 }}
+          />
+        </td>
+      ))}
+    </tr>
+  ));
+}
 
 export function CrudTable({
   title, subtitle, icon,
@@ -19,7 +38,16 @@ export function CrudTable({
   exportCsvUrl,
   extraHeaderButtons,
   filters,
-  sortBy,               // string field | (row) => value — default: auto (first string col)
+  totalCount,
+  sortBy,
+  emptyState,
+  loading = false,
+  // Server-side pagination
+  serverSide    = false,
+  serverPage    = 1,
+  serverPages   = 1,
+  onServerPage  = null,
+  onServerSearch = null,
 }) {
   const { t, toast } = useApp();
   const [search,     setSearch]     = useState('');
@@ -30,11 +58,39 @@ export function CrudTable({
   const [deleting,   setDeleting]   = useState(false);
   const [selected,   setSelected]   = useState(new Set());
   const [showBulkConfirm, setShowBulkConfirm] = useState(false);
-  const [perPage,    setPerPage]    = useState(0);   // 0 = tout afficher (défilement infini)
+  const [perPage,    setPerPage]    = useState(0);
+  // P3 — colonnes masquables
+  const [hiddenCols,   setHiddenCols]   = useState(new Set());
+  const [showColMenu,  setShowColMenu]  = useState(false);
+  const colMenuRef     = useRef(null);
+  const searchTimerRef = useRef(null);
+
+  // Fermer le menu colonnes au clic extérieur
+  useEffect(() => {
+    if (!showColMenu) return;
+    const handler = (e) => {
+      if (colMenuRef.current && !colMenuRef.current.contains(e.target)) {
+        setShowColMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showColMenu]);
+
+  const toggleCol = (key) => {
+    setHiddenCols(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const visibleCols = columns.filter(col => !hiddenCols.has(col.key ?? col.accessor));
 
   const PER_PAGE = perPage;
+  const needle   = search.toLowerCase();
 
-  const needle = search.toLowerCase();
   const colVal = (col, row) => {
     if (col.searchValue) return col.searchValue(row);
     if (col.accessor)    return row[col.accessor];
@@ -46,14 +102,17 @@ export function CrudTable({
     }
     return null;
   };
-  const filtered = !search.trim() ? data : data.filter(row =>
-    columns.some(col => {
-      const val = colVal(col, row);
-      return val !== null && String(val ?? '').toLowerCase().includes(needle);
-    })
-  );
 
-  // ── Tri alphabétique ─────────────────────────────────────────────────────
+  // In serverSide+onServerSearch mode: skip local filtering (server already filtered)
+  const filtered = (serverSide && onServerSearch)
+    ? data
+    : !search.trim() ? data : data.filter(row =>
+        columns.some(col => {
+          const val = colVal(col, row);
+          return val !== null && String(val ?? '').toLowerCase().includes(needle);
+        })
+      );
+
   const sortKey = (row) => {
     if (typeof sortBy === 'function') return sortBy(row);
     if (typeof sortBy === 'string')   return row[sortBy];
@@ -63,21 +122,29 @@ export function CrudTable({
     }
     return '';
   };
-  const sorted = [...filtered].sort((a, b) => {
-    const va = String(sortKey(a) ?? '');
-    const vb = String(sortKey(b) ?? '');
-    return va.localeCompare(vb, 'fr', { sensitivity: 'base' });
-  });
+  // In serverSide mode: server sorts, skip local sort
+  const sorted = serverSide
+    ? filtered
+    : [...filtered].sort((a, b) =>
+        String(sortKey(a) ?? '').localeCompare(String(sortKey(b) ?? ''), 'fr', { sensitivity: 'base' })
+      );
 
-  const pages      = perPage === 0 ? 1 : Math.max(1, Math.ceil(sorted.length / PER_PAGE));
-  const safePage   = Math.min(page, pages);
-  const paginated  = perPage === 0 ? sorted : sorted.slice((safePage - 1) * PER_PAGE, safePage * PER_PAGE);
+  const clientPages    = perPage === 0 ? 1 : Math.max(1, Math.ceil(sorted.length / PER_PAGE));
+  const clientSafePage = Math.min(page, clientPages);
+  // In serverSide mode: data IS the current page — show it all
+  const paginated = serverSide
+    ? sorted
+    : perPage === 0 ? sorted : sorted.slice((clientSafePage - 1) * PER_PAGE, clientSafePage * PER_PAGE);
+
+  // Effective display values (server overrides client when serverSide=true)
+  const displayPages = serverSide ? serverPages   : clientPages;
+  const displayPage  = serverSide ? serverPage    : clientSafePage;
+  const goToPage     = (p) => { if (serverSide) onServerPage?.(p); else setPage(p); };
 
   const openAdd  = () => { setEditItem(null); setShowModal(true); };
   const openEdit = (item) => { setEditItem(item); setShowModal(true); };
   const close    = () => { setShowModal(false); setEditItem(null); };
 
-  // ── Sélection multiple ────────────────────────────────────────────────────
   const getPk = (row) => row.id ?? row.mle_etudiant ?? row.mle_ens ??
     row.code_classe ?? row.login ?? row.code_inscription ??
     row.code_paiement ?? row.code_eval ?? JSON.stringify(row);
@@ -86,18 +153,14 @@ export function CrudTable({
     const pk = getPk(row);
     setSelected(prev => {
       const next = new Set(prev);
-      if (next.has(pk)) next.delete(pk);
-      else next.add(pk);
+      if (next.has(pk)) next.delete(pk); else next.add(pk);
       return next;
     });
   };
 
   const toggleAll = () => {
-    if (selected.size === paginated.length) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(paginated.map(getPk)));
-    }
+    if (selected.size === paginated.length) setSelected(new Set());
+    else setSelected(new Set(paginated.map(getPk)));
   };
 
   const allSelected = paginated.length > 0 && selected.size === paginated.length;
@@ -114,42 +177,45 @@ export function CrudTable({
     }
   };
 
-  // ── Export CSV ────────────────────────────────────────────────────────────
-  const handleExportCsv = () => {
-    if (exportCsvUrl) {
-      // Récupère le token pour l'export
-      const token = localStorage.getItem('sms_access');
-      // Ouvre dans un nouvel onglet avec le token dans l'URL
-      const url = `http://localhost:8000${exportCsvUrl}`;
-      fetch(url, { headers: { Authorization: `Bearer ${token}` } })
-        .then(r => r.blob())
-        .then(blob => {
-          const a = document.createElement('a');
-          a.href = URL.createObjectURL(blob);
-          a.download = exportCsvUrl.split('/').filter(Boolean).pop() + '.csv';
-          a.click();
-          toast.success(t.toast.exported);
-        })
-        .catch(() => toast.error(t.toast.error));
+  const handleExportCsv = async () => {
+    if (!exportCsvUrl) return;
+    const token = localStorage.getItem('sms_access');
+    const url   = `http://localhost:8000${exportCsvUrl}`;
+    try {
+      const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (!r.ok) { toast.error(t.toast.error); return; }
+      const disp  = r.headers.get('Content-Disposition') || '';
+      const match = disp.match(/filename="?([^";\n]+)"?/);
+      const ext   = exportCsvUrl.includes('xlsx') ? '.xlsx' : '.csv';
+      const name  = match ? match[1] : (exportCsvUrl.split('/').filter(Boolean).at(-2) || 'export') + ext;
+      const blob  = await r.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = name; a.click();
+      URL.revokeObjectURL(a.href);
+      toast.success(t.toast.exported);
+    } catch {
+      toast.error(t.toast.error);
     }
   };
 
+  const colCount = visibleCols.length + (onBulkDelete ? 2 : 1);
+
   return (
-    <div>
+    <div className="animate-fadeInUp">
       {/* Page header */}
       <div className="page-header">
         <div>
           <h1 className="page-title">
-            <i className={`${icon} text-green`} style={{ marginRight:10, fontSize:22 }}></i>
+            <i className={`${icon} text-green`} style={{ marginRight: 10, fontSize: 22 }}></i>
             {title}
           </h1>
           {subtitle && <p className="page-subtitle">{subtitle}</p>}
         </div>
-        <div className="flex gap-2" style={{ flexWrap:'wrap' }}>
+        <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
           {extraHeaderButtons}
           {exportCsvUrl && (
             <button className="sms-btn sms-btn-outline sms-btn-sm" onClick={handleExportCsv}>
-              <i className="fas fa-file-csv"></i> Export CSV
+              <i className="fas fa-file-excel"></i> Export Excel
             </button>
           )}
           <button className="sms-btn sms-btn-primary" onClick={openAdd}>
@@ -159,96 +225,196 @@ export function CrudTable({
       </div>
 
       {/* Filtres additionnels */}
-      {filters && <div style={{ marginBottom:16 }}>{filters}</div>}
+      {filters && <div className="sms-filter-bar" style={{ marginBottom: 16 }}>{filters}</div>}
 
-      {/* Bulk actions */}
+      {/* Bulk action bar */}
       {selected.size > 0 && onBulkDelete && (
         <div style={{
-          display:'flex', alignItems:'center', gap:12, padding:'10px 16px',
-          background:'rgba(239,83,80,.08)', border:'1px solid rgba(239,83,80,.2)',
-          borderRadius:8, marginBottom:12,
+          display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px',
+          background: 'rgba(239,83,80,.08)', border: '1px solid rgba(239,83,80,.2)',
+          borderRadius: 8, marginBottom: 12,
+          animation: 'fadeInUp .2s ease',
         }}>
-          <i className="fas fa-check-square" style={{ color:'var(--danger)' }}></i>
-          <span style={{ fontSize:13, color:'var(--text-primary)', fontWeight:600 }}>
+          <i className="fas fa-check-square" style={{ color: 'var(--danger)' }}></i>
+          <span style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 600 }}>
             {selected.size} {t.common.elements} {t.common.selected}
           </span>
-          <button
-            className="sms-btn sms-btn-danger sms-btn-sm"
-            onClick={() => setShowBulkConfirm(true)}
-          >
+          <button className="sms-btn sms-btn-danger sms-btn-sm" onClick={() => setShowBulkConfirm(true)}>
             <i className="fas fa-trash"></i> {t.common.deleteSelection}
           </button>
-          <button
-            className="sms-btn sms-btn-outline sms-btn-sm"
-            onClick={() => setSelected(new Set())}
-          >
+          <button className="sms-btn sms-btn-outline sms-btn-sm" onClick={() => setSelected(new Set())}>
             {t.common.deselect}
           </button>
         </div>
       )}
 
       {/* Table card */}
-      <div className="sms-card" style={{ display:'flex', flexDirection:'column', maxHeight:'calc(100vh - 220px)', overflow:'hidden' }}>
-        <div className="sms-card-header" style={{ flexShrink:0 }}>
+      <div className="sms-card" style={{ display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 160px)', overflow: 'hidden' }}>
+        {/* Card header */}
+        <div className="sms-card-header" style={{ flexShrink: 0 }}>
           <div className="sms-card-title">
-            <i className="fas fa-list"></i> {t.common.list} ({sorted.length})
+            <i className="fas fa-list"></i>
+            {t.common.list} ({loading ? '…' : (totalCount ?? (serverSide ? data.length : sorted.length))})
+            {hiddenCols.size > 0 && (
+              <span style={{
+                marginLeft: 8, fontSize: 10, fontWeight: 700, padding: '2px 7px',
+                background: 'var(--accent-glow)', color: 'var(--accent)',
+                borderRadius: 12, border: '1px solid var(--accent)',
+              }}>
+                {hiddenCols.size} col. masquée{hiddenCols.size > 1 ? 's' : ''}
+              </span>
+            )}
           </div>
-          <div className="sms-search">
-            <i className="fas fa-search"></i>
-            <input
-              type="text"
-              placeholder={t.common.search}
-              value={search}
-              onChange={e => { setSearch(e.target.value); setPage(1); }}
-            />
+
+          <div className="flex gap-2" style={{ alignItems: 'center' }}>
+            {/* Barre de recherche */}
+            <div className="sms-search">
+              <i className="fas fa-search"></i>
+              <input
+                type="text"
+                placeholder={t.common.search}
+                value={search}
+                onChange={e => {
+                  const val = e.target.value;
+                  setSearch(val);
+                  if (!serverSide) { setPage(1); return; }
+                  if (onServerSearch) {
+                    clearTimeout(searchTimerRef.current);
+                    searchTimerRef.current = setTimeout(() => {
+                      onServerPage?.(1);
+                      onServerSearch(val);
+                    }, 350);
+                  }
+                }}
+              />
+            </div>
+
+            {/* P3 — bouton colonnes */}
+            <div ref={colMenuRef} style={{ position: 'relative' }}>
+              <button
+                className="sms-btn-icon"
+                onClick={() => setShowColMenu(v => !v)}
+                title="Colonnes visibles"
+                style={{ borderColor: showColMenu ? 'var(--accent)' : undefined }}
+              >
+                <i className="fas fa-table-columns" style={{ fontSize: 12 }}></i>
+              </button>
+
+              {showColMenu && (
+                <div style={{
+                  position: 'absolute', top: 'calc(100% + 8px)', right: 0,
+                  background: 'var(--bg-card)', border: '1px solid var(--border-light)',
+                  borderRadius: 10, boxShadow: 'var(--shadow)',
+                  minWidth: 210, zIndex: 2000,
+                  animation: 'slideUp .15s ease',
+                  overflow: 'hidden',
+                }}>
+                  <div style={{
+                    padding: '10px 14px 6px',
+                    fontSize: 10, fontWeight: 700, color: 'var(--text-muted)',
+                    textTransform: 'uppercase', letterSpacing: '.8px',
+                    borderBottom: '1px solid var(--border)',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  }}>
+                    <span>Colonnes</span>
+                    {hiddenCols.size > 0 && (
+                      <button
+                        onClick={() => setHiddenCols(new Set())}
+                        style={{ fontSize: 10, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700 }}
+                      >
+                        Tout afficher
+                      </button>
+                    )}
+                  </div>
+                  <div style={{ maxHeight: 300, overflowY: 'auto', padding: '4px 0' }}>
+                    {columns.map(col => {
+                      const key     = col.key ?? col.accessor;
+                      const visible = !hiddenCols.has(key);
+                      return (
+                        <button
+                          key={key}
+                          onClick={() => toggleCol(key)}
+                          style={{
+                            width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+                            padding: '8px 14px',
+                            background: 'transparent', border: 'none', cursor: 'pointer',
+                            textAlign: 'left',
+                            color: visible ? 'var(--text-primary)' : 'var(--text-muted)',
+                            fontSize: 12, fontWeight: visible ? 500 : 400,
+                            transition: 'background .12s',
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.background = 'var(--accent-glow)'}
+                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                        >
+                          <i
+                            className={`fas fa-${visible ? 'eye' : 'eye-slash'}`}
+                            style={{ fontSize: 11, width: 14, textAlign: 'center', color: visible ? 'var(--accent)' : 'var(--border-light)', flexShrink: 0 }}
+                          />
+                          {col.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
-        <div className="sms-table-wrap" style={{ flex:1, overflowY:'auto', overflowX:'auto' }}>
+        {/* Table */}
+        <div className="sms-table-wrap" style={{ flex: 1, overflowY: 'auto', overflowX: 'auto' }}>
           <table className="sms-table">
             <thead>
               <tr>
                 {onBulkDelete && (
-                  <th style={{ width:40, position:'sticky', top:0, zIndex:3, background:'var(--bg-card)' }}>
+                  <th style={{ width: 40 }}>
                     <input
                       type="checkbox"
                       checked={allSelected}
                       onChange={toggleAll}
-                      style={{ cursor:'pointer', accentColor:'var(--green)' }}
+                      style={{ cursor: 'pointer', accentColor: 'var(--green)' }}
                     />
                   </th>
                 )}
-                {columns.map(col => <th key={col.key || col.accessor} style={{ position:'sticky', top:0, zIndex:3, background:'var(--bg-card)' }}>{col.label}</th>)}
-                <th style={{ width:90, position:'sticky', top:0, zIndex:3, background:'var(--bg-card)' }}>{t.common.actions}</th>
+                {visibleCols.map(col => (
+                  <th key={col.key ?? col.accessor}>{col.label}</th>
+                ))}
+                <th style={{ width: 90 }}>{t.common.actions}</th>
               </tr>
             </thead>
             <tbody>
-              {paginated.length === 0 ? (
+              {/* P4 — Skeleton loading */}
+              {loading ? (
+                <SkeletonRows colCount={colCount} />
+              ) : paginated.length === 0 ? (
                 <tr>
-                  <td colSpan={columns.length + (onBulkDelete ? 2 : 1)}>
-                    <div className="sms-empty">
-                      <i className="fas fa-inbox"></i>
-                      <p>{t.common.noResult}</p>
-                    </div>
+                  <td colSpan={colCount} style={{ padding: 0 }}>
+                    {emptyState
+                      ? <EmptyState compact {...emptyState} />
+                      : <div className="sms-empty">
+                          <i className="fas fa-inbox"></i>
+                          <p>{t.common.noResult}</p>
+                        </div>
+                    }
                   </td>
                 </tr>
-              ) : paginated.map((row, i) => {
-                const pk = getPk(row);
+              ) : paginated.map((row) => {
+                const pk         = getPk(row);
                 const isSelected = selected.has(pk);
                 return (
-                  <tr key={pk} style={{ background: isSelected ? 'rgba(76,175,80,.05)' : '' }}>
+                  <tr key={pk} style={{ background: isSelected ? 'rgba(76,175,80,.06)' : '' }}>
                     {onBulkDelete && (
                       <td>
                         <input
                           type="checkbox"
                           checked={isSelected}
                           onChange={() => toggleSelect(row)}
-                          style={{ cursor:'pointer', accentColor:'var(--green)' }}
+                          style={{ cursor: 'pointer', accentColor: 'var(--green)' }}
                         />
                       </td>
                     )}
-                    {columns.map(col => (
-                      <td key={col.key || col.accessor}>
+                    {visibleCols.map(col => (
+                      <td key={col.key ?? col.accessor}>
                         {col.render
                           ? col.render(row)
                           : col.bold
@@ -274,65 +440,66 @@ export function CrudTable({
           </table>
         </div>
 
-        {/* Footer toujours visible — contenu défile derrière */}
-        <div style={{ flexShrink:0, padding:'8px 16px', borderTop:'1px solid var(--border)', boxShadow:'0 -4px 16px rgba(0,0,0,.10)', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8, background:'var(--bg-card)', zIndex:2, position:'relative' }}>
-            {/* Compteur + sélecteur par page */}
-            <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-              <span style={{ fontSize:12, color:'var(--text-muted)' }}>
-                {perPage === 0
+        {/* Table footer */}
+        <div style={{
+          flexShrink: 0, padding: '8px 16px',
+          borderTop: '1px solid var(--border)',
+          boxShadow: '0 -4px 16px rgba(0,0,0,.08)',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          flexWrap: 'wrap', gap: 8,
+          background: 'var(--bg-card)', zIndex: 2, position: 'relative',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              {serverSide
+                ? `${data.length} ${t.common.of} ${totalCount ?? '?'} ${t.common.elements}`
+                : perPage === 0
                   ? `${sorted.length} ${sorted.length !== 1 ? t.common.elements : t.common.element}`
-                  : `${Math.min((safePage-1)*PER_PAGE+1, sorted.length)}–${Math.min(safePage*PER_PAGE, sorted.length)} ${t.common.of} ${sorted.length}`
-                }
-              </span>
-              <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-                <span style={{ fontSize:11, color:'var(--text-muted)' }}>{t.common.perPage}</span>
+                  : `${Math.min((clientSafePage-1)*PER_PAGE+1, sorted.length)}–${Math.min(clientSafePage*PER_PAGE, sorted.length)} ${t.common.of} ${sorted.length}`
+              }
+            </span>
+            {/* Boutons perPage masqués en mode serveur (le serveur contrôle la taille) */}
+            {!serverSide && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t.common.perPage}</span>
                 {[10, 25, 50, 0].map(n => (
                   <button
                     key={n}
                     onClick={() => { setPerPage(n); setPage(1); }}
                     style={{
-                      padding:'2px 7px', fontSize:11, borderRadius:4, cursor:'pointer', border:'1px solid',
-                      borderColor: perPage === n ? 'var(--green)' : 'var(--border)',
-                      background:  perPage === n ? 'var(--green-glow)' : 'transparent',
-                      color:       perPage === n ? 'var(--green)' : 'var(--text-muted)',
+                      padding: '2px 7px', fontSize: 11, borderRadius: 4, cursor: 'pointer', border: '1px solid',
+                      borderColor: perPage === n ? 'var(--accent)' : 'var(--border)',
+                      background:  perPage === n ? 'var(--accent-glow)' : 'transparent',
+                      color:       perPage === n ? 'var(--accent)' : 'var(--text-muted)',
                       fontWeight:  perPage === n ? 700 : 400,
+                      transition:  'all .15s',
                     }}
                   >{n === 0 ? t.common.all : n}</button>
                 ))}
               </div>
-            </div>
-
-            {/* Numéros de page */}
-            {perPage !== 0 && pages > 1 && (() => {
-              const maxBtn = 5;
-              const half   = Math.floor(maxBtn / 2);
-              let start    = Math.max(1, safePage - half);
-              let end      = Math.min(pages, start + maxBtn - 1);
-              if (end - start < maxBtn - 1) start = Math.max(1, end - maxBtn + 1);
-              const nums = Array.from({ length: end - start + 1 }, (_, i) => start + i);
-              return (
-                <div className="sms-pagination">
-                  <button className="sms-page-btn" onClick={() => setPage(1)} disabled={safePage===1} title={t.common.first}>
-                    <i className="fas fa-angle-double-left" style={{ fontSize:10 }}></i>
-                  </button>
-                  <button className="sms-page-btn" onClick={() => setPage(p => Math.max(1,p-1))} disabled={safePage===1}>
-                    <i className="fas fa-chevron-left" style={{ fontSize:10 }}></i>
-                  </button>
-                  {start > 1 && <span style={{ fontSize:12, color:'var(--text-muted)', padding:'0 2px' }}>…</span>}
-                  {nums.map(p => (
-                    <button key={p} className={`sms-page-btn ${p===safePage?'active':''}`} onClick={() => setPage(p)}>{p}</button>
-                  ))}
-                  {end < pages && <span style={{ fontSize:12, color:'var(--text-muted)', padding:'0 2px' }}>…</span>}
-                  <button className="sms-page-btn" onClick={() => setPage(p => Math.min(pages,p+1))} disabled={safePage===pages}>
-                    <i className="fas fa-chevron-right" style={{ fontSize:10 }}></i>
-                  </button>
-                  <button className="sms-page-btn" onClick={() => setPage(pages)} disabled={safePage===pages} title={t.common.last}>
-                    <i className="fas fa-angle-double-right" style={{ fontSize:10 }}></i>
-                  </button>
-                </div>
-              );
-            })()}
+            )}
           </div>
+
+          {displayPages > 1 && (
+            <div className="sms-pagination">
+              <button className="sms-page-btn" onClick={() => goToPage(1)} disabled={displayPage===1} title={t.common.first}>
+                <i className="fas fa-angle-double-left" style={{ fontSize: 10 }}></i>
+              </button>
+              <button className="sms-page-btn" onClick={() => goToPage(Math.max(1, displayPage-1))} disabled={displayPage===1}>
+                <i className="fas fa-chevron-left" style={{ fontSize: 10 }}></i>
+              </button>
+              <span style={{ fontSize: 12, color: 'var(--text-secondary)', padding: '0 10px', fontWeight: 600, minWidth: 72, textAlign: 'center', lineHeight: '32px' }}>
+                {displayPage} / {displayPages}
+              </span>
+              <button className="sms-page-btn" onClick={() => goToPage(Math.min(displayPages, displayPage+1))} disabled={displayPage===displayPages}>
+                <i className="fas fa-chevron-right" style={{ fontSize: 10 }}></i>
+              </button>
+              <button className="sms-page-btn" onClick={() => goToPage(displayPages)} disabled={displayPage===displayPages} title={t.common.last}>
+                <i className="fas fa-angle-double-right" style={{ fontSize: 10 }}></i>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Modal Ajout / Modification */}
@@ -363,19 +530,27 @@ export function CrudTable({
       {/* Modal suppression unitaire */}
       {delItem && (
         <div className="sms-overlay" onClick={e => e.target===e.currentTarget && setDelItem(null)}>
-          <div className="sms-modal" style={{ maxWidth:400 }}>
+          <div className="sms-modal" style={{ maxWidth: 400 }}>
             <div className="sms-modal-header">
-              <div className="sms-modal-title" style={{ color:'var(--danger)' }}>
-                <i className="fas fa-exclamation-triangle" style={{ marginRight:8 }}></i>
+              <div className="sms-modal-title" style={{ color: 'var(--danger)' }}>
+                <i className="fas fa-exclamation-triangle" style={{ marginRight: 8 }}></i>
                 {t.common.confirm}
               </div>
             </div>
             <div className="sms-modal-body">
-              <p style={{ color:'var(--text-secondary)', fontSize:13 }}>{t.common.confirmMsg}</p>
+              <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{t.common.confirmMsg}</p>
             </div>
             <div className="sms-modal-footer">
               <button className="sms-btn sms-btn-outline sms-btn-sm" onClick={() => setDelItem(null)}>{t.common.cancel}</button>
-              <button className="sms-btn sms-btn-danger sms-btn-sm" disabled={deleting} onClick={async () => { setDeleting(true); try { await onDelete?.(delItem); setDelItem(null); } finally { setDeleting(false); } }}>
+              <button
+                className="sms-btn sms-btn-danger sms-btn-sm"
+                disabled={deleting}
+                onClick={async () => {
+                  setDeleting(true);
+                  try { await onDelete?.(delItem); setDelItem(null); }
+                  finally { setDeleting(false); }
+                }}
+              >
                 <i className="fas fa-trash"></i> {t.common.delete}
               </button>
             </div>
@@ -386,15 +561,15 @@ export function CrudTable({
       {/* Modal suppression multiple */}
       {showBulkConfirm && (
         <div className="sms-overlay" onClick={e => e.target===e.currentTarget && setShowBulkConfirm(false)}>
-          <div className="sms-modal" style={{ maxWidth:420 }}>
+          <div className="sms-modal" style={{ maxWidth: 420 }}>
             <div className="sms-modal-header">
-              <div className="sms-modal-title" style={{ color:'var(--danger)' }}>
-                <i className="fas fa-exclamation-triangle" style={{ marginRight:8 }}></i>
+              <div className="sms-modal-title" style={{ color: 'var(--danger)' }}>
+                <i className="fas fa-exclamation-triangle" style={{ marginRight: 8 }}></i>
                 {t.common.bulkDeleteTitle}
               </div>
             </div>
             <div className="sms-modal-body">
-              <p style={{ color:'var(--text-secondary)', fontSize:13 }}>
+              <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
                 {t.common.bulkDeleteMsgPre} <strong>{selected.size} {t.common.elements}</strong>.{' '}
                 {t.common.bulkDeleteMsgPost}
               </p>
@@ -414,8 +589,8 @@ export function CrudTable({
   );
 }
 
-/* ── FormField helper ──────────────────────────────────────── */
-export function FormField({ label, name, type='text', value, onChange, options, required, placeholder, disabled }) {
+/* ── FormField helper ──────────────────────────────────────────────── */
+export function FormField({ label, name, type='text', value, onChange, options, required, placeholder, disabled, help, error, onBlur }) {
   const { t } = useApp();
   if (type === 'searchable') {
     return (
@@ -425,20 +600,31 @@ export function FormField({ label, name, type='text', value, onChange, options, 
       />
     );
   }
+  const inputStyle = error ? { borderColor: '#ef5350' } : {};
   return (
     <div className="sms-form-group">
       <label className="sms-label">
-        {label}{required && <span style={{ color:'var(--green)' }}> *</span>}
+        {label}{required && <span style={{ color: 'var(--accent)' }}> *</span>}
       </label>
       {type === 'select' ? (
-        <select className="sms-input" name={name} value={value} onChange={onChange} required={required} disabled={disabled}>
+        <select className="sms-input" name={name} value={value} onChange={onChange} onBlur={onBlur} required={required} disabled={disabled} style={inputStyle}>
           <option value="">{t.common.select}</option>
           {options?.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
       ) : type === 'textarea' ? (
-        <textarea className="sms-input" name={name} value={value} onChange={onChange} rows={3} placeholder={placeholder} disabled={disabled} />
+        <textarea className="sms-input" name={name} value={value} onChange={onChange} onBlur={onBlur} rows={3} placeholder={placeholder} disabled={disabled} style={inputStyle} />
       ) : (
-        <input className="sms-input" type={type} name={name} value={value} onChange={onChange} required={required} placeholder={placeholder} disabled={disabled} />
+        <input className="sms-input" type={type} name={name} value={value} onChange={onChange} onBlur={onBlur} required={required} placeholder={placeholder} disabled={disabled} style={inputStyle} />
+      )}
+      {help && !error && (
+        <small style={{ display: 'block', marginTop: 3, fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4 }}>
+          {help}
+        </small>
+      )}
+      {error && (
+        <small style={{ display: 'block', marginTop: 3, fontSize: 11, color: '#ef5350', lineHeight: 1.4 }}>
+          <i className="fas fa-exclamation-circle" style={{ marginRight: 4 }}></i>{error}
+        </small>
       )}
     </div>
   );

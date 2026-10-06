@@ -2,7 +2,7 @@
  * pages/Planning.jsx
  * Emploi du temps — HEBDO (grille semaine) + INTENSIF (semaine dédiée).
  */
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { useApi, useMutation } from '../hooks/useApi';
 import { FormField } from '../components/CrudTable';
@@ -12,11 +12,20 @@ import {
   jourService, salleService, classeService,
 } from '../services/endpoints';
 import SearchableSelect from '../components/SearchableSelect';
+import { useEtablissement } from '../hooks/useEtablissement';
+import { etabLabels } from '../utils/etabLabels';
+import { CoursForm } from './Cours';
 
-const PAUSE_STORAGE_KEY = 'sms_planning_pauses_v2';
+const PAUSE_STORAGE_KEY = 'sms_planning_pauses_v3';
+// Chaque entrée : { label, h_debut, h_fin, active }
+// pauses[0] = 1ère pause (toujours visible), pauses[1] = 2ème pause (désactivée par défaut)
+// overrides: { 'Lundi': [ pause0, pause1 ] }  — remplace toutes les pauses du jour
 const DEFAULT_PAUSE_CONFIG = {
-  default:   { label: 'Pause', h_debut: '12:00', h_fin: '12:30' },
-  overrides: {},   // { 'Lundi': { label, h_debut, h_fin }, … }
+  pauses: [
+    { label: 'Pause',   h_debut: '10:00', h_fin: '10:30', active: true  },
+    { label: 'Pause 2', h_debut: '12:00', h_fin: '12:30', active: false },
+  ],
+  overrides: {},
 };
 
 const JOURS_FR        = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
@@ -76,7 +85,7 @@ function buildPrintHTML(hebdo, classeLabel, semestreLabel, joursLabels) {
           <div style="font-size:8px;color:#555;">${(p.h_debut || '').slice(0, 5)} – ${(p.h_fin || '').slice(0, 5)}</div>
           ${height > 42 && p.nom_ens ? `<div style="font-size:8px;color:#777;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${p.nom_ens}</div>` : ''}
           ${height > 28 ? `<span style="font-size:7px;font-weight:bold;background:${tsCol}20;color:${tsCol};border-radius:2px;padding:0 3px;">${p.type_seance || ''}</span>` : ''}
-          ${height > 52 && p.groupes ? `<div style="font-size:7px;color:#e65100;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">👥 ${p.groupes}</div>` : ''}
+          ${height > 52 && p.groupes ? `<div style="font-size:7px;color:#e65100;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Gr. ${p.groupes}</div>` : ''}
         </div>`;
       }).join('')}
     </div>`
@@ -116,7 +125,7 @@ function buildPrintHTML(hebdo, classeLabel, semestreLabel, joursLabels) {
 </head>
 <body>
   <div class="actions">
-    <button class="btn-print" onclick="window.print()">🖨️ Imprimer / Enregistrer en PDF</button>
+    <button class="btn-print" onclick="window.print()">Imprimer / Enregistrer en PDF</button>
     <button class="btn-close"  onclick="window.close()">✕ Fermer</button>
   </div>
   <div class="sheet">
@@ -143,8 +152,8 @@ function buildPrintHTML(hebdo, classeLabel, semestreLabel, joursLabels) {
 }
 
 // ── Formulaire ajout / modification ──────────────────────────────────────────
-function PlanningForm({ item, onClose, onSave }) {
-  const { t } = useApp();
+function PlanningForm({ item, onClose, onSave, labels }) {
+  const { t, toast } = useApp();
   const [f, setF] = useState({
     code_cours:    item?.code_cours    || '',
     type_planning: item?.type_planning || 'HEBDO',
@@ -158,14 +167,39 @@ function PlanningForm({ item, onClose, onSave }) {
   });
   const ch = e => setF(prev => ({ ...prev, [e.target.name]: e.target.value }));
 
-  const { data: cours }  = useApi(() => coursService.list({ page_size: 500 }));
-  const { data: jours }  = useApi(() => jourService.list({ page_size: 10 }));
-  const { data: salles } = useApi(() => salleService.list({ page_size: 100 }));
+  const { data: cours, reload: reloadCours } = useApi(useCallback(() => coursService.list({ page_size: 500 }), []));
+  const { data: jours }  = useApi(useCallback(() => jourService.list({ page_size: 10 }),  []));
+  const { data: salles } = useApi(useCallback(() => salleService.list({ page_size: 100 }), []));
+  const { mutate: createCours } = useMutation(useCallback(d => coursService.create(d), []));
+
+  // Permet de créer à la volée un cours (matière/classe/enseignant/semestre) qui n'existe
+  // pas encore, sans quitter le formulaire du créneau — un créneau ne peut être affecté
+  // qu'à un cours déjà attribué, donc réaffecter une classe passe par ici.
+  const [showNewCours, setShowNewCours] = useState(false);
+
+  // Le catalogue de cours est plafonné à 500 lignes (perf) : le cours déjà affecté à ce
+  // créneau peut donc être absent de la page chargée (tri par année/classe/matière), ce qui
+  // viderait son libellé dans le menu. On le récupère individuellement dans ce cas.
+  const [editedCoursOpt, setEditedCoursOpt] = useState(null);
+  useEffect(() => {
+    if (!item?.code_cours || !cours) { setEditedCoursOpt(null); return; }
+    if (cours.some(c => String(c.id) === String(item.code_cours))) { setEditedCoursOpt(null); return; }
+    let cancelled = false;
+    coursService.get(item.code_cours).then(({ data: c }) => {
+      if (cancelled) return;
+      setEditedCoursOpt({
+        value: c.id,
+        label: `${c.lib_matiere || c.code_matiere} · ${c.lib_classe || c.code_classe} · ${c.semestre}`,
+      });
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [item, cours]);
 
   const isHebdo    = f.type_planning === 'HEBDO';
   const isIntensif = f.type_planning === 'INTENSIF';
 
   return (
+    <>
     <form onSubmit={e => {
       e.preventDefault();
       onSave({
@@ -180,11 +214,24 @@ function PlanningForm({ item, onClose, onSave }) {
       <FormField
         label={t.pages.planning.form.coursLabel} name="code_cours" type="searchable"
         value={f.code_cours} onChange={ch} required
-        options={(cours || []).map(c => ({
-          value: c.id,
-          label: `${c.lib_matiere || c.code_matiere} · ${c.lib_classe || c.code_classe} · ${c.semestre}`,
-        }))}
+        options={[
+          ...(editedCoursOpt ? [editedCoursOpt] : []),
+          ...(cours || []).map(c => ({
+            value: c.id,
+            label: `${c.lib_matiere || c.code_matiere} · ${c.lib_classe || c.code_classe} · ${c.semestre}`,
+          })),
+        ]}
       />
+      <div style={{ margin: '-8px 0 14px', textAlign: 'right' }}>
+        <button
+          type="button"
+          onClick={() => setShowNewCours(true)}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 11, color: 'var(--accent)' }}
+        >
+          <i className="fas fa-plus" style={{ marginRight: 4 }}></i>
+          {t.pages.planning.form.newCoursLink}
+        </button>
+      </div>
 
       {/* Système + type de séance */}
       <div className="sms-form-row">
@@ -220,8 +267,8 @@ function PlanningForm({ item, onClose, onSave }) {
       {/* INTENSIF : semaine (lundi → vendredi/samedi) */}
       {isIntensif && (
         <div className="sms-form-row">
-          <FormField label={t.pages.planning.form.weekStart} name="date_debut" type="date" value={f.date_debut} onChange={ch} required />
-          <FormField label={t.pages.planning.form.weekEnd}   name="date_fin"   type="date" value={f.date_fin}   onChange={ch} required />
+          <FormField label={t.pages.planning.form.weekStart} name="date_debut" type="date" value={f.date_debut} onChange={ch} required help="La date doit être un lundi (début de semaine)" />
+          <FormField label={t.pages.planning.form.weekEnd}   name="date_fin"   type="date" value={f.date_fin}   onChange={ch} required help="Dernier jour de la semaine intensive (vendredi ou samedi)" />
         </div>
       )}
 
@@ -245,12 +292,44 @@ function PlanningForm({ item, onClose, onSave }) {
         </button>
       </div>
     </form>
+
+    {/* Création rapide d'un cours (matière/classe/enseignant/semestre) sans quitter le créneau */}
+    {showNewCours && (
+      <div className="sms-overlay" onClick={e => e.target === e.currentTarget && setShowNewCours(false)}>
+        <div className="sms-modal" style={{ maxWidth: 560 }}>
+          <div className="sms-modal-header">
+            <div className="sms-modal-title">
+              <i className="fas fa-book-open" style={{ marginRight: 8 }}></i>
+              {t.pages.planning.form.newCoursModalTitle}
+            </div>
+          </div>
+          <div className="sms-modal-body">
+            <CoursForm
+              labels={labels}
+              onClose={() => setShowNewCours(false)}
+              onSave={async d => {
+                try {
+                  const created = await createCours(d);
+                  await reloadCours();
+                  setF(prev => ({ ...prev, code_cours: created.id }));
+                  setShowNewCours(false);
+                  toast.success(t.toast.added);
+                } catch (err) { toast.error(err.message); }
+              }}
+            />
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 
 // ── Page principale ───────────────────────────────────────────────────────────
 export default function Planning() {
-  const { t, toast } = useApp();
+  const { t, toast, lang } = useApp();
+  const { typeEtab, systeme } = useEtablissement();
+  const labels = etabLabels(typeEtab, systeme, lang);
   const [classeFilter,   setClasseFilter]   = useState('');  // stocke code_classe
   const [semestreFilter, setSemestreFilter] = useState('');
   const [view,      setView]      = useState('grid'); // 'grid' | 'list'
@@ -262,26 +341,47 @@ export default function Planning() {
   const [pauseConfig, setPauseConfig] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(PAUSE_STORAGE_KEY));
-      return saved?.default ? saved : DEFAULT_PAUSE_CONFIG;
+      return saved?.pauses ? saved : DEFAULT_PAUSE_CONFIG;
     } catch { return DEFAULT_PAUSE_CONFIG; }
   });
   const [showPauseModal, setShowPauseModal] = useState(false);
+
+  // PRIMAIRE / SECONDAIRE supportent 2 pauses, SUPERIEUR 1 seule
+  const maxPauses = labels.isSuperieur ? 1 : 2;
 
   useEffect(() => {
     localStorage.setItem(PAUSE_STORAGE_KEY, JSON.stringify(pauseConfig));
   }, [pauseConfig]);
 
-  const getPauseForDay    = day => pauseConfig.overrides[day] || pauseConfig.default;
-  const updateDefault     = (field, val) =>
-    setPauseConfig(c => ({ ...c, default: { ...c.default, [field]: val } }));
+  const getPausesForDay = day => pauseConfig.overrides[day] || pauseConfig.pauses;
+
+  const updatePause = (idx, field, val) =>
+    setPauseConfig(c => {
+      const next = c.pauses.map((p, i) => i === idx ? { ...p, [field]: val } : p);
+      return { ...c, pauses: next };
+    });
+  const togglePauseActive = idx =>
+    setPauseConfig(c => {
+      const next = c.pauses.map((p, i) => i === idx ? { ...p, active: !p.active } : p);
+      return { ...c, pauses: next };
+    });
+
   const enableDayOverride = day =>
     setPauseConfig(c => ({
-      ...c, overrides: { ...c.overrides, [day]: { ...c.default } },
+      ...c, overrides: { ...c.overrides, [day]: c.pauses.map(p => ({ ...p })) },
     }));
-  const updateDayOverride = (day, field, val) =>
-    setPauseConfig(c => ({
-      ...c, overrides: { ...c.overrides, [day]: { ...(c.overrides[day] || c.default), [field]: val } },
-    }));
+  const updateDayPause = (day, idx, field, val) =>
+    setPauseConfig(c => {
+      const base = c.overrides[day] || c.pauses.map(p => ({ ...p }));
+      const next = base.map((p, i) => i === idx ? { ...p, [field]: val } : p);
+      return { ...c, overrides: { ...c.overrides, [day]: next } };
+    });
+  const toggleDayPauseActive = (day, idx) =>
+    setPauseConfig(c => {
+      const base = c.overrides[day] || c.pauses.map(p => ({ ...p }));
+      const next = base.map((p, i) => i === idx ? { ...p, active: !p.active } : p);
+      return { ...c, overrides: { ...c.overrides, [day]: next } };
+    });
   const removeDayOverride = day =>
     setPauseConfig(c => {
       const { [day]: _, ...rest } = c.overrides;
@@ -290,7 +390,8 @@ export default function Planning() {
 
   const { data: planningData, loading, error, reload } = useApi(
     useCallback(() => {
-      const params = { page_size: 5000 };
+      // Charge tout pour le filtre actif (max 200 créneaux par classe = bien suffisant)
+      const params = { page_size: 200 };
       if (classeFilter)   params['code_cours__code_classe'] = classeFilter;
       if (semestreFilter) params['code_cours__semestre']    = semestreFilter;
       return planningService.list(params);
@@ -306,18 +407,25 @@ export default function Planning() {
   const { mutate: remove } = useMutation(useCallback(d => planningService.delete(d.id), []));
 
   const planning = planningData || [];
-  const filtered = planning;  // filtrage déjà fait côté serveur
 
-  const hebdo    = filtered.filter(p => p.type_planning === 'HEBDO');
-  const intensif = filtered.filter(p => p.type_planning === 'INTENSIF');
+  const filtered = useMemo(() => [...planning].sort((a, b) => {
+    if (a.type_planning !== b.type_planning) return a.type_planning === 'HEBDO' ? -1 : 1;
+    if (a.type_planning === 'INTENSIF') {
+      const da = a.date_debut || '', db = b.date_debut || '';
+      return da < db ? -1 : da > db ? 1 : 0;
+    }
+    return 0;
+  }), [planning]);
 
-  // Grille HEBDO : regrouper par jour (positionnement absolu)
-  const byDay = {};
-  JOURS_FR.forEach(j => { byDay[j] = []; });
-  hebdo.forEach(p => {
-    const jour = p.lib_jour || '';
-    if (byDay[jour]) byDay[jour].push(p);
-  });
+  const hebdo    = useMemo(() => filtered.filter(p => p.type_planning === 'HEBDO'),    [filtered]);
+  const intensif = useMemo(() => filtered.filter(p => p.type_planning === 'INTENSIF'), [filtered]);
+
+  const byDay = useMemo(() => {
+    const map = {};
+    JOURS_FR.forEach(j => { map[j] = []; });
+    hebdo.forEach(p => { const jour = p.lib_jour || ''; if (map[jour]) map[jour].push(p); });
+    return map;
+  }, [hebdo]);
 
   // Bascule automatiquement en vue liste si la classe sélectionnée n'a que des créneaux INTENSIF
   useEffect(() => {
@@ -330,7 +438,106 @@ export default function Planning() {
   const openEdit = item   => { setEditItem(item);  setShowModal(true); };
   const close    = ()     => { setShowModal(false); setEditItem(null); };
 
+  // ── Génération automatique des séances ────────────────────────────────────
+  const [genModal,    setGenModal]    = useState(false);
+  const [genDate,     setGenDate]     = useState(() => {
+    // Calculer le prochain lundi
+    const d = new Date();
+    const day = d.getDay();
+    const diff = day === 0 ? 1 : (8 - day) % 7 || 7;
+    d.setDate(d.getDate() + diff);
+    return d.toISOString().slice(0, 10);
+  });
+  const [genAnnee,    setGenAnnee]    = useState('');
+  const [genLoading,  setGenLoading]  = useState(false);
+
+  const handleGenererSeances = async () => {
+    if (!genDate || !genAnnee) { toast.error('Sélectionnez une date et une année.'); return; }
+    setGenLoading(true);
+    try {
+      const res = await planningService.genererSeances(genDate, genAnnee);
+      const { created, skipped } = res.data;
+      toast.success(`${created} séance(s) créée(s)${skipped > 0 ? ` — ${skipped} déjà existante(s)` : ''}.`);
+      setGenModal(false);
+    } catch (e) { toast.error(e.message); }
+    finally { setGenLoading(false); }
+  };
+
+  // ── Génération sur toute une période (HEBDO + INTENSIF) ──────────────────
+  const [genPeriodeModal,   setGenPeriodeModal]   = useState(false);
+  const [genPeriodeDebut,   setGenPeriodeDebut]   = useState('');
+  const [genPeriodeFin,     setGenPeriodeFin]     = useState('');
+  const [genPeriodeAnnee,   setGenPeriodeAnnee]   = useState('');
+  const [genPeriodeLoading, setGenPeriodeLoading] = useState(false);
+
+  const handleGenererPeriode = async () => {
+    if (!genPeriodeDebut || !genPeriodeFin || !genPeriodeAnnee) {
+      toast.error('Date de début, date de fin et année scolaire sont requis.');
+      return;
+    }
+    if (genPeriodeFin < genPeriodeDebut) {
+      toast.error('La date de fin doit être postérieure à la date de début.');
+      return;
+    }
+    setGenPeriodeLoading(true);
+    try {
+      const res = await planningService.genererPeriode(genPeriodeDebut, genPeriodeFin, genPeriodeAnnee);
+      const { created, skipped } = res.data;
+      toast.success(`${created} séance(s) créée(s)${skipped > 0 ? ` — ${skipped} déjà existante(s)` : ''}.`);
+      setGenPeriodeModal(false);
+    } catch (e) { toast.error(e?.response?.data?.detail || e.message); }
+    finally { setGenPeriodeLoading(false); }
+  };
+
+  // Détecte un chevauchement horaire entre deux créneaux
+  const hasOverlap = (formData) => {
+    if (formData.type_planning !== 'HEBDO') return null;
+    const h1Start = formData.h_debut;
+    const h1End   = formData.h_fin;
+    if (!h1Start || !h1End || !formData.code_jour) return null;
+
+    // Cherche le cours sélectionné pour obtenir classe et enseignant
+    const coursId = Number(formData.code_cours);
+    const coursObj = (planningData || []).find(p => Number(p.code_cours) === coursId);
+
+    const conflicts = (planningData || []).filter(p => {
+      // Ignorer le créneau en cours de modification
+      if (editItem && p.id === editItem.id) return false;
+      // Doit être HEBDO et même jour
+      if (p.type_planning !== 'HEBDO') return false;
+
+      const pJour = typeof p.code_jour === 'object' ? p.code_jour?.code_jour : p.code_jour;
+      const fJour = typeof formData.code_jour === 'object' ? formData.code_jour?.code_jour : formData.code_jour;
+      if (pJour !== fJour) return false;
+
+      // Vérifier le chevauchement horaire
+      const p2Start = p.h_debut?.slice(0, 5) || '';
+      const p2End   = p.h_fin?.slice(0, 5)   || '';
+      const overlap = h1Start < p2End && h1End > p2Start;
+      if (!overlap) return false;
+
+      // Conflit si même classe OU même enseignant
+      const sameClasse = p.lib_classe && coursObj?.lib_classe &&
+        p.lib_classe === coursObj.lib_classe;
+      const sameEns = p.nom_ens && coursObj?.nom_ens &&
+        p.nom_ens === coursObj.nom_ens;
+      return sameClasse || sameEns;
+    });
+
+    if (conflicts.length === 0) return null;
+
+    const c = conflicts[0];
+    const pJour = typeof c.code_jour === 'object' ? c.code_jour?.code_jour : c.code_jour;
+    return `Chevauchement détecté : "${c.lib_matiere || ''}" · ${c.lib_classe || ''} · ${c.h_debut?.slice(0,5)}–${c.h_fin?.slice(0,5)} (${pJour})`;
+  };
+
   const handleSave = async formData => {
+    // Vérification anti-chevauchement avant envoi
+    const conflict = hasOverlap(formData);
+    if (conflict) {
+      toast.error(conflict);
+      return;
+    }
     try {
       if (editItem) await update({ ...editItem, ...formData });
       else          await create(formData);
@@ -342,8 +549,9 @@ export default function Planning() {
 
   const handleExportPDF = () => {
     const classeLabel   = (classes || []).find(c => c.code_classe === classeFilter)?.lib_classe || classeFilter || '';
-    const semestreLabel = semestreFilter === 'S1' ? t.pages.planning.sem1
-                        : semestreFilter === 'S2' ? t.pages.planning.sem2 : '';
+    const allOpts = [...labels.semestres];
+    const found = allOpts.find(o => o.value === semestreFilter);
+    const semestreLabel = found?.label || '';
     const joursLabels   = JOURS_FR.map(j => t.common.jours[JOUR_FR_TO_CODE[j]] || j);
     const win = window.open('', '_blank');
     if (!win) { toast.error(t.pages.planning.popupBlocked); return; }
@@ -407,12 +615,127 @@ export default function Planning() {
             <i className="fas fa-file-pdf"></i> {t.pages.planning.exportPdf}
           </button>
 
+          {/* Générer séances (1 semaine, HEBDO uniquement) */}
+          <button className="sms-btn sms-btn-outline" onClick={() => setGenModal(true)}
+            title="Générer les séances de la semaine depuis le planning"
+            style={{ borderColor: 'rgba(66,165,245,.4)', color: '#42a5f5' }}>
+            <i className="fas fa-magic"></i> Générer séances
+          </button>
+
+          {/* Générer toute la période (HEBDO + INTENSIF) */}
+          <button className="sms-btn sms-btn-outline" onClick={() => setGenPeriodeModal(true)}
+            title={t.pages.planning.genPeriode.btnLabel}
+            style={{ borderColor: 'rgba(102,187,106,.4)', color: '#66bb6a' }}>
+            <i className="fas fa-calendar-alt"></i> {t.pages.planning.genPeriode.btnLabel}
+          </button>
+
           {/* Ajouter */}
           <button className="sms-btn sms-btn-primary" onClick={openAdd}>
             <i className="fas fa-plus"></i> {t.pages.planning.newSlot}
           </button>
         </div>
       </div>
+
+      {/* ── Modal génération séances ── */}
+      {genModal && (
+        <div className="sms-overlay" onClick={e => e.target === e.currentTarget && setGenModal(false)}>
+          <div className="sms-modal" style={{ maxWidth: 420 }}>
+            <div className="sms-modal-header">
+              <div className="sms-modal-title">
+                <i className="fas fa-magic" style={{ marginRight: 8, color: '#42a5f5' }} />
+                {t.pages.planning.genSeances.title}
+              </div>
+              <button className="sms-btn-icon" onClick={() => setGenModal(false)}>
+                <i className="fas fa-times" />
+              </button>
+            </div>
+            <div className="sms-modal-body">
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16 }}>
+                {t.pages.planning.genSeances.desc}
+              </p>
+              <div className="sms-form-row">
+                <div className="sms-form-group">
+                  <label className="sms-label">{t.pages.planning.genSeances.mondayLabel} *</label>
+                  <input className="sms-input" type="date" value={genDate}
+                    onChange={e => setGenDate(e.target.value)} />
+                  <span style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2, display: 'block' }}>
+                    {t.pages.planning.genSeances.mondayHelp}
+                  </span>
+                </div>
+                <div className="sms-form-group">
+                  <label className="sms-label">{t.pages.planning.genSeances.anneeLabel} *</label>
+                  <input className="sms-input" type="text" value={genAnnee}
+                    onChange={e => setGenAnnee(e.target.value)}
+                    placeholder="Ex : 2025-2026" />
+                </div>
+              </div>
+            </div>
+            <div className="sms-modal-footer">
+              <button className="sms-btn sms-btn-outline sms-btn-sm" onClick={() => setGenModal(false)}>
+                {t.common.cancel}
+              </button>
+              <button className="sms-btn sms-btn-primary sms-btn-sm"
+                onClick={handleGenererSeances} disabled={genLoading}>
+                {genLoading
+                  ? <><div className="sms-spinner" style={{ width: 12, height: 12, display: 'inline-block', marginRight: 6 }} />{t.pages.planning.genSeances.generating}</>
+                  : <><i className="fas fa-magic" style={{ marginRight: 6 }} />{t.pages.planning.genSeances.generate}</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal génération période (HEBDO + INTENSIF) ── */}
+      {genPeriodeModal && (
+        <div className="sms-overlay" onClick={e => e.target === e.currentTarget && setGenPeriodeModal(false)}>
+          <div className="sms-modal" style={{ maxWidth: 440 }}>
+            <div className="sms-modal-header">
+              <div className="sms-modal-title">
+                <i className="fas fa-calendar-alt" style={{ marginRight: 8, color: '#66bb6a' }} />
+                {t.pages.planning.genPeriode.title}
+              </div>
+              <button className="sms-btn-icon" onClick={() => setGenPeriodeModal(false)}>
+                <i className="fas fa-times" />
+              </button>
+            </div>
+            <div className="sms-modal-body">
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16 }}>
+                {t.pages.planning.genPeriode.desc}
+              </p>
+              <div className="sms-form-row">
+                <div className="sms-form-group">
+                  <label className="sms-label">{t.pages.planning.genPeriode.dateDebut} *</label>
+                  <input className="sms-input" type="date" value={genPeriodeDebut}
+                    onChange={e => setGenPeriodeDebut(e.target.value)} />
+                </div>
+                <div className="sms-form-group">
+                  <label className="sms-label">{t.pages.planning.genPeriode.dateFin} *</label>
+                  <input className="sms-input" type="date" value={genPeriodeFin}
+                    onChange={e => setGenPeriodeFin(e.target.value)} />
+                </div>
+              </div>
+              <div className="sms-form-group">
+                <label className="sms-label">{t.pages.planning.genPeriode.anneeLabel} *</label>
+                <input className="sms-input" type="text" value={genPeriodeAnnee}
+                  onChange={e => setGenPeriodeAnnee(e.target.value)}
+                  placeholder="Ex : 2025-2026" />
+              </div>
+            </div>
+            <div className="sms-modal-footer">
+              <button className="sms-btn sms-btn-outline sms-btn-sm" onClick={() => setGenPeriodeModal(false)}>
+                {t.common.cancel}
+              </button>
+              <button className="sms-btn sms-btn-primary sms-btn-sm"
+                onClick={handleGenererPeriode} disabled={genPeriodeLoading}
+                style={{ background: '#66bb6a', borderColor: '#66bb6a' }}>
+                {genPeriodeLoading
+                  ? <><div className="sms-spinner" style={{ width: 12, height: 12, display: 'inline-block', marginRight: 6 }} />{t.pages.planning.genPeriode.generating}</>
+                  : <><i className="fas fa-calendar-alt" style={{ marginRight: 6 }} />{t.pages.planning.genPeriode.generate}</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Filtres ── */}
       <div className="flex gap-2" style={{ marginBottom: 8, flexWrap: 'wrap' }}>
@@ -427,9 +750,12 @@ export default function Planning() {
         </div>
         <select className="sms-input" style={{ height: 36, minWidth: 130 }}
           value={semestreFilter} onChange={e => setSemestreFilter(e.target.value)}>
-          <option value="">{t.pages.planning.allSemesters}</option>
-          <option value="S1">{t.pages.planning.sem1}</option>
-          <option value="S2">{t.pages.planning.sem2}</option>
+          <option value="">
+            {labels.isPreBac ? t.pages.planning.allTrimesters : t.pages.planning.allSemesters}
+          </option>
+          {labels.semestres.map(opt => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
         </select>
       </div>
 
@@ -469,6 +795,25 @@ export default function Planning() {
               </div>
               <div style={{ fontSize: 12 }}>
                 {t.pages.planning.selectClassHint}
+              </div>
+              <div style={{ marginTop: 14, fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                <i className="fas fa-list" style={{ marginRight: 6 }}></i>
+                {t.pages.planning.selectClassTip}
+              </div>
+            </div>
+          ) : !semestreFilter ? (
+            // Une grille hebdomadaire ne peut représenter qu'une seule période à la fois :
+            // deux semestres/trimestres ne se déroulent pas simultanément dans l'année, mais
+            // leurs créneaux peuvent tomber sur le même jour/heure et se superposer visuellement
+            // (un bloc en cache alors un autre, sans indication). On force donc à choisir une
+            // période précise pour la vue grille ; la vue « Tous » reste disponible sans filtre.
+            <div style={{ textAlign: 'center', padding: 56, color: 'var(--text-muted)' }}>
+              <i className="fas fa-layer-group" style={{ fontSize: 40, marginBottom: 14, display: 'block', opacity: .5 }}></i>
+              <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6, color: 'var(--text-secondary)' }}>
+                {labels.isPreBac ? t.pages.planning.selectTrimester : t.pages.planning.selectSemester}
+              </div>
+              <div style={{ fontSize: 12, maxWidth: 420, margin: '0 auto' }}>
+                {t.pages.planning.selectPeriodHint}
               </div>
               <div style={{ marginTop: 14, fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>
                 <i className="fas fa-list" style={{ marginRight: 6 }}></i>
@@ -525,13 +870,13 @@ export default function Planning() {
                       {String(h).padStart(2, '0')}:00
                     </div>
                   ))}
-                  {/* Indicateur de pause — position de la pause par défaut */}
-                  {(() => {
-                    const startMin = timeToMin(pauseConfig.default.h_debut);
+                  {/* Indicateurs de pauses actives */}
+                  {pauseConfig.pauses.filter(p => p.active).map((p, idx) => {
+                    const startMin = timeToMin(p.h_debut);
                     if (startMin < GRID_START * 60 || startMin >= GRID_END * 60) return null;
                     const top = (startMin - GRID_START * 60) / 60 * HOUR_HEIGHT;
                     return (
-                      <div style={{
+                      <div key={idx} style={{
                         position: 'absolute', top, left: 0, right: 0,
                         display: 'flex', justifyContent: 'center',
                         pointerEvents: 'none',
@@ -539,7 +884,7 @@ export default function Planning() {
                         <i className="fas fa-coffee" style={{ fontSize: 9, color: '#ffa726', opacity: .85 }}></i>
                       </div>
                     );
-                  })()}
+                  })}
                 </div>
 
                 {/* Colonnes jours */}
@@ -559,30 +904,35 @@ export default function Planning() {
                       }} />
                     ))}
 
-                    {/* Bande de pause propre à ce jour */}
+                    {/* Bandes de pause propres à ce jour (1 ou 2 selon typeEtab) */}
                     {(() => {
-                      const pause    = getPauseForDay(j);
+                      const pauses   = getPausesForDay(j);
                       const isCustom = Boolean(pauseConfig.overrides[j]);
-                      const startMin = timeToMin(pause.h_debut);
-                      const endMin   = timeToMin(pause.h_fin);
-                      if (startMin < GRID_START * 60 || endMin > GRID_END * 60) return null;
-                      const top    = (startMin - GRID_START * 60) / 60 * HOUR_HEIGHT;
-                      const height = Math.max((endMin - startMin) / 60 * HOUR_HEIGHT, 8);
-                      const color  = isCustom ? '#ef5350' : '#ffa726';
-                      return (
-                        <div style={{
-                          position: 'absolute', top, left: 0, right: 0, height,
-                          background: `repeating-linear-gradient(45deg,${color}18,${color}18 4px,${color}08 4px,${color}08 8px)`,
-                          borderTop: `1px dashed ${color}50`,
-                          borderBottom: `1px dashed ${color}50`,
-                          zIndex: 0, pointerEvents: 'none',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        }}>
-                          <span style={{ fontSize: 9, color, opacity: .75, fontStyle: 'italic', userSelect: 'none' }}>
-                            {pause.label}{isCustom ? ' ★' : ''}
-                          </span>
-                        </div>
-                      );
+                      return pauses
+                        .slice(0, maxPauses)
+                        .filter(p => p.active)
+                        .map((pause, idx) => {
+                          const startMin = timeToMin(pause.h_debut);
+                          const endMin   = timeToMin(pause.h_fin);
+                          if (startMin < GRID_START * 60 || endMin > GRID_END * 60) return null;
+                          const top    = (startMin - GRID_START * 60) / 60 * HOUR_HEIGHT;
+                          const height = Math.max((endMin - startMin) / 60 * HOUR_HEIGHT, 8);
+                          const color  = idx === 1 ? '#ab47bc' : (isCustom ? '#ef5350' : '#ffa726');
+                          return (
+                            <div key={idx} style={{
+                              position: 'absolute', top, left: 0, right: 0, height,
+                              background: `repeating-linear-gradient(45deg,${color}18,${color}18 4px,${color}08 4px,${color}08 8px)`,
+                              borderTop: `1px dashed ${color}50`,
+                              borderBottom: `1px dashed ${color}50`,
+                              zIndex: 0, pointerEvents: 'none',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}>
+                              <span style={{ fontSize: 9, color, opacity: .75, fontStyle: 'italic', userSelect: 'none' }}>
+                                {pause.label}{isCustom ? ' ★' : ''}
+                              </span>
+                            </div>
+                          );
+                        });
                     })()}
 
                     {/* Blocs de cours positionnés absolument */}
@@ -746,7 +1096,7 @@ export default function Planning() {
               <button className="sms-btn-icon" onClick={close}><i className="fas fa-times"></i></button>
             </div>
             <div className="sms-modal-body">
-              <PlanningForm item={editItem} onClose={close} onSave={handleSave} />
+              <PlanningForm item={editItem} onClose={close} onSave={handleSave} labels={labels} />
             </div>
           </div>
         </div>
@@ -768,43 +1118,71 @@ export default function Planning() {
 
             <div className="sms-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
 
-              {/* ── Pause par défaut ── */}
+              {/* ── Pauses par défaut (1 ou 2 selon typeEtab) ── */}
               <div>
                 <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
                   <i className="fas fa-globe" style={{ marginRight: 6, color: '#ffa726' }}></i>
                   {t.pages.planning.defaultPause}
                 </div>
-                <div style={{
-                  display: 'grid', gridTemplateColumns: '1fr 100px 100px',
-                  gap: 8, padding: '12px 14px',
-                  background: '#ffa72610', borderRadius: 8,
-                  border: '1px solid #ffa72640',
-                }}>
-                  <div>
-                    <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>{t.pages.planning.labelField}</div>
-                    <input
-                      className="sms-input" style={{ height: 32, fontSize: 12 }}
-                      value={pauseConfig.default.label}
-                      onChange={e => updateDefault('label', e.target.value)}
-                      placeholder={t.pages.planning.labelField}
-                    />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>{t.pages.planning.startField}</div>
-                    <input type="time" className="sms-input"
-                      style={{ height: 32, fontSize: 12, padding: '0 6px' }}
-                      value={pauseConfig.default.h_debut}
-                      onChange={e => updateDefault('h_debut', e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>{t.pages.planning.endField}</div>
-                    <input type="time" className="sms-input"
-                      style={{ height: 32, fontSize: 12, padding: '0 6px' }}
-                      value={pauseConfig.default.h_fin}
-                      onChange={e => updateDefault('h_fin', e.target.value)}
-                    />
-                  </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {pauseConfig.pauses.slice(0, maxPauses).map((pause, idx) => {
+                    const colors = ['#ffa726', '#ab47bc'];
+                    const color  = colors[idx];
+                    return (
+                      <div key={idx} style={{
+                        display: 'grid', gridTemplateColumns: '28px 1fr 100px 100px',
+                        gap: 8, padding: '12px 14px',
+                        background: `${color}10`, borderRadius: 8,
+                        border: `1px solid ${color}40`,
+                        opacity: pause.active ? 1 : .5,
+                      }}>
+                        {/* Toggle actif */}
+                        <div style={{ display: 'flex', alignItems: 'center' }}>
+                          <button
+                            onClick={() => togglePauseActive(idx)}
+                            title={pause.active ? 'Désactiver' : 'Activer'}
+                            style={{
+                              width: 22, height: 22, border: `2px solid ${color}`,
+                              borderRadius: 4, background: pause.active ? color : 'transparent',
+                              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}
+                          >
+                            {pause.active && <i className="fas fa-check" style={{ fontSize: 10, color: '#fff' }}></i>}
+                          </button>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>
+                            {t.pages.planning.labelField} {idx + 1}
+                          </div>
+                          <input
+                            className="sms-input" style={{ height: 32, fontSize: 12 }}
+                            value={pause.label}
+                            onChange={e => updatePause(idx, 'label', e.target.value)}
+                            disabled={!pause.active}
+                            placeholder={`Pause ${idx + 1}`}
+                          />
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>{t.pages.planning.startField}</div>
+                          <input type="time" className="sms-input"
+                            style={{ height: 32, fontSize: 12, padding: '0 6px' }}
+                            value={pause.h_debut}
+                            onChange={e => updatePause(idx, 'h_debut', e.target.value)}
+                            disabled={!pause.active}
+                          />
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>{t.pages.planning.endField}</div>
+                          <input type="time" className="sms-input"
+                            style={{ height: 32, fontSize: 12, padding: '0 6px' }}
+                            value={pause.h_fin}
+                            onChange={e => updatePause(idx, 'h_fin', e.target.value)}
+                            disabled={!pause.active}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -817,7 +1195,12 @@ export default function Planning() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {JOURS_FR.map(jour => {
                     const hasOverride = Boolean(pauseConfig.overrides[jour]);
-                    const ov = pauseConfig.overrides[jour] || pauseConfig.default;
+                    const ovPauses    = pauseConfig.overrides[jour] || pauseConfig.pauses;
+                    const summary     = ovPauses
+                      .slice(0, maxPauses)
+                      .filter(p => p.active)
+                      .map(p => `${p.h_debut}–${p.h_fin}`)
+                      .join(', ');
                     return (
                       <div key={jour} style={{
                         borderRadius: 8, border: `1px solid ${hasOverride ? '#ef535050' : 'var(--border)'}`,
@@ -833,19 +1216,12 @@ export default function Planning() {
                             <span style={{ fontSize: 12, fontWeight: 700, color: hasOverride ? '#ef5350' : 'var(--text-primary)', minWidth: 70 }}>
                               {t.common.jours[JOUR_FR_TO_CODE[jour]] || jour}
                             </span>
-                            {!hasOverride && (
-                              <span style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                                {pauseConfig.default.h_debut} – {pauseConfig.default.h_fin} ({t.pages.planning.defaultTag})
-                              </span>
-                            )}
-                            {hasOverride && (
-                              <span style={{ fontSize: 10, color: '#ef5350', fontStyle: 'italic' }}>
-                                {ov.h_debut} – {ov.h_fin} {t.pages.planning.customTag}
-                              </span>
-                            )}
+                            <span style={{ fontSize: 10, color: hasOverride ? '#ef5350' : 'var(--text-muted)', fontStyle: 'italic' }}>
+                              {summary || '—'} {hasOverride ? t.pages.planning.customTag : `(${t.pages.planning.defaultTag})`}
+                            </span>
                           </div>
                           <button
-                            className={`sms-btn sms-btn-sm ${hasOverride ? 'sms-btn-outline' : 'sms-btn-outline'}`}
+                            className="sms-btn sms-btn-sm sms-btn-outline"
                             style={{
                               fontSize: 10, padding: '3px 10px', height: 26,
                               borderColor: hasOverride ? '#ef5350' : 'var(--border)',
@@ -860,37 +1236,56 @@ export default function Planning() {
                           </button>
                         </div>
 
-                        {/* Champs éditables — visibles seulement si override actif */}
+                        {/* Champs éditables par pause — visibles seulement si override actif */}
                         {hasOverride && (
-                          <div style={{
-                            display: 'grid', gridTemplateColumns: '1fr 100px 100px',
-                            gap: 8, padding: '0 14px 12px',
-                          }}>
-                            <div>
-                              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>{t.pages.planning.labelField}</div>
-                              <input
-                                className="sms-input" style={{ height: 30, fontSize: 12 }}
-                                value={ov.label}
-                                onChange={e => updateDayOverride(jour, 'label', e.target.value)}
-                                placeholder={t.pages.planning.labelField}
-                              />
-                            </div>
-                            <div>
-                              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>{t.pages.planning.startField}</div>
-                              <input type="time" className="sms-input"
-                                style={{ height: 30, fontSize: 12, padding: '0 6px' }}
-                                value={ov.h_debut}
-                                onChange={e => updateDayOverride(jour, 'h_debut', e.target.value)}
-                              />
-                            </div>
-                            <div>
-                              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>{t.pages.planning.endField}</div>
-                              <input type="time" className="sms-input"
-                                style={{ height: 30, fontSize: 12, padding: '0 6px' }}
-                                value={ov.h_fin}
-                                onChange={e => updateDayOverride(jour, 'h_fin', e.target.value)}
-                              />
-                            </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '0 14px 12px' }}>
+                            {ovPauses.slice(0, maxPauses).map((ov, idx) => {
+                              const colors = ['#ffa726', '#ab47bc'];
+                              const color  = colors[idx];
+                              return (
+                                <div key={idx} style={{
+                                  display: 'grid', gridTemplateColumns: '28px 1fr 100px 100px',
+                                  gap: 6, padding: '8px 10px',
+                                  background: `${color}08`, borderRadius: 6,
+                                  border: `1px solid ${color}30`,
+                                  opacity: ov.active ? 1 : .5,
+                                }}>
+                                  <div style={{ display: 'flex', alignItems: 'center' }}>
+                                    <button
+                                      onClick={() => toggleDayPauseActive(jour, idx)}
+                                      style={{
+                                        width: 20, height: 20, border: `2px solid ${color}`,
+                                        borderRadius: 3, background: ov.active ? color : 'transparent',
+                                        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                      }}
+                                    >
+                                      {ov.active && <i className="fas fa-check" style={{ fontSize: 9, color: '#fff' }}></i>}
+                                    </button>
+                                  </div>
+                                  <div>
+                                    <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>{t.pages.planning.labelField} {idx + 1}</div>
+                                    <input className="sms-input" style={{ height: 28, fontSize: 11 }}
+                                      value={ov.label} disabled={!ov.active}
+                                      onChange={e => updateDayPause(jour, idx, 'label', e.target.value)}
+                                    />
+                                  </div>
+                                  <div>
+                                    <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>{t.pages.planning.startField}</div>
+                                    <input type="time" className="sms-input" style={{ height: 28, fontSize: 11, padding: '0 4px' }}
+                                      value={ov.h_debut} disabled={!ov.active}
+                                      onChange={e => updateDayPause(jour, idx, 'h_debut', e.target.value)}
+                                    />
+                                  </div>
+                                  <div>
+                                    <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>{t.pages.planning.endField}</div>
+                                    <input type="time" className="sms-input" style={{ height: 28, fontSize: 11, padding: '0 4px' }}
+                                      value={ov.h_fin} disabled={!ov.active}
+                                      onChange={e => updateDayPause(jour, idx, 'h_fin', e.target.value)}
+                                    />
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                         )}
                       </div>

@@ -3,7 +3,17 @@ djangorestframework==3.17.0
 djangorestframework-simplejwt==5.5.1
 django-cors-headers==4.9.0
 django-filter==25.2
+drf-spectacular==0.30.0
 mysqlclient==2.2.8
 PyJWT==2.12.1
 python-dotenv==1.1.0
 Pillow==12.2.0
+openpyxl==3.1.5
+
+# ── Production : serveur WSGI + fichiers statiques ────────────────────────────
+# whitenoise sert les fichiers statiques directement depuis Django (pas besoin
+# de nginx séparé pour ça). gunicorn/waitress sont choisis automatiquement selon
+# l'OS du serveur (gunicorn ne fonctionne pas sur Windows, faute de fork()).
+whitenoise==6.8.2
+gunicorn==23.0.0; sys_platform != 'win32'
+waitress==3.0.2; sys_platform == 'win32'

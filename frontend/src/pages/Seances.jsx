@@ -1,13 +1,16 @@
 /**
  * pages/Seances.jsx — Séances de cours et feuille d'émargement
  */
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import api from '../services/api';
 import { CrudTable, FormField } from '../components/CrudTable';
+import SearchableSelect from '../components/SearchableSelect';
 import { useApp } from '../context/AppContext';
 import { useApi, useMutation } from '../hooks/useApi';
 import { seanceService, absenceService } from '../services/endpoints';
 import { LoadingState, ErrorState } from '../components/ApiState';
+import { useEtablissement } from '../hooks/useEtablissement';
+import { etabLabels } from '../utils/etabLabels';
 
 const STATUT_COLORS = {
   TENU: 'badge-success', ANNULE: 'badge-danger',
@@ -16,7 +19,9 @@ const STATUT_COLORS = {
 
 // ── Modale Présences ─────────────────────────────────────────────────────────
 function PresencesModal({ seance, onClose, toast }) {
-  const { t } = useApp();
+  const { t, lang } = useApp();
+  const { typeEtab, systeme } = useEtablissement();
+  const labels = etabLabels(typeEtab, systeme, lang);
   const [presences, setPresences]   = useState([]);
   const [etudiants, setEtudiants]   = useState([]);
   const [loading,   setLoading]     = useState(true);
@@ -105,7 +110,7 @@ function PresencesModal({ seance, onClose, toast }) {
                 <table className="sms-table" style={{ fontSize: 12 }}>
                   <thead>
                     <tr>
-                      <th>{t.fields.nomEtud}</th>
+                      <th>{labels.studentLabel}</th>
                       <th style={{ textAlign: 'center', width: 80 }}>{t.common.present}</th>
                       <th style={{ textAlign: 'center', width: 80 }}>{t.common.signed}</th>
                     </tr>
@@ -199,44 +204,32 @@ function Form({ item, onClose, onSave }) {
   return (
     <form onSubmit={e => { e.preventDefault(); onSave(f); }}>
       <div className="sms-form-row">
-        <div className="sms-form-group">
-          <label className="sms-label">{t.fields.matiere} <span style={{ color: 'var(--green)' }}>*</span></label>
-          <select className="sms-input" name="code_matiere" value={f.code_matiere} onChange={ch} required>
-            <option value="">{t.common.select}</option>
-            {matieres.map(m => <option key={m.code_matiere} value={m.code_matiere}>{m.lib_matiere}</option>)}
-          </select>
-        </div>
-        <div className="sms-form-group">
-          <label className="sms-label">{t.fields.classe} <span style={{ color: 'var(--green)' }}>*</span></label>
-          <select className="sms-input" name="code_classe" value={f.code_classe} onChange={ch} required>
-            <option value="">{t.common.select}</option>
-            {classes.map(c => <option key={c.code_classe} value={c.code_classe}>{c.lib_classe}</option>)}
-          </select>
-        </div>
+        <SearchableSelect
+          label={t.fields.matiere} name="code_matiere" value={f.code_matiere} onChange={ch} required
+          options={matieres.map(m => ({ value: m.code_matiere, label: m.lib_matiere }))}
+        />
+        <SearchableSelect
+          label={t.fields.classe} name="code_classe" value={f.code_classe} onChange={ch} required
+          options={classes.map(c => ({ value: c.code_classe, label: c.lib_classe }))}
+        />
       </div>
       <div className="sms-form-row">
-        <div className="sms-form-group">
-          <label className="sms-label">{t.fields.enseignant} <span style={{ color: 'var(--green)' }}>*</span></label>
-          <select className="sms-input" name="mle_ens" value={f.mle_ens} onChange={ch} required>
-            <option value="">{t.common.select}</option>
-            {enseignants.map(e => <option key={e.mle_ens} value={e.mle_ens}>{e.nom_ens} {e.prenom_ens || ''}</option>)}
-          </select>
-        </div>
-        <div className="sms-form-group">
-          <label className="sms-label">{t.fields.annee} <span style={{ color: 'var(--green)' }}>*</span></label>
-          <select className="sms-input" name="code_annee" value={f.code_annee} onChange={ch} required>
-            <option value="">{t.common.select}</option>
-            {annees.map(a => <option key={a.code_annee} value={a.code_annee}>{a.lib_annee || a.code_annee}</option>)}
-          </select>
-        </div>
+        <SearchableSelect
+          label={t.fields.enseignant} name="mle_ens" value={f.mle_ens} onChange={ch} required
+          options={enseignants.map(e => ({ value: e.mle_ens, label: `${e.nom_ens} ${e.prenom_ens || ''}`.trim() }))}
+        />
+        <SearchableSelect
+          label={t.fields.annee} name="code_annee" value={f.code_annee} onChange={ch} required
+          options={annees.map(a => ({ value: a.code_annee, label: a.lib_annee || a.code_annee }))}
+        />
       </div>
       <div className="sms-form-row">
-        <FormField label={t.fields.date}      name="date_seance" type="date" value={f.date_seance} onChange={ch} required />
+        <FormField label={t.fields.date}      name="date_seance" type="date" value={f.date_seance} onChange={ch} required help="Format : JJ/MM/AAAA" />
         <FormField label={t.fields.heureDebut} name="h_debut" type="time" value={f.h_debut} onChange={ch} required />
         <FormField label={t.fields.heureFin}   name="h_fin"   type="time" value={f.h_fin}   onChange={ch} required />
       </div>
       <div className="sms-form-row">
-        <FormField label={t.fields.salle}    name="salle"                value={f.salle}                onChange={ch} />
+        <FormField label={t.fields.salle}    name="salle" value={f.salle} onChange={ch} placeholder="Ex : Amphi A, Salle 203" help="Nom libre — pas de liste imposée (ex: bâtiment + numéro)" />
         <FormField label={t.fields.heuresEff} name="nb_heures_effectuees" type="number" value={f.nb_heures_effectuees} onChange={ch} />
         <div className="sms-form-group">
           <label className="sms-label">{t.fields.statut}</label>
@@ -258,22 +251,91 @@ function Form({ item, onClose, onSave }) {
 
 // ── Page principale ───────────────────────────────────────────────────────────
 export default function Seances() {
-  const { t, toast } = useApp();
-  const [presModal, setPresModal] = useState(null);
+  const { t, toast, anneeActive } = useApp();
+  const [presModal,    setPresModal]    = useState(null);
   const [classeFilter, setClasseFilter] = useState('');
-  const [classes, setClasses] = useState([]);
+  const [depFilter,    setDepFilter]    = useState('');
+  const [spFilter,     setSpFilter]     = useState('');
+  const [allClasses,   setAllClasses]   = useState([]);
+  const [departements, setDepartements] = useState([]);
+  const [specialites,  setSpecialites]  = useState([]);
+  const [filteredSp,   setFilteredSp]   = useState([]);
 
-  const { data, loading, error, reload } = useApi(
-    () => seanceService.list({ page_size: 100, ...(classeFilter ? { code_classe: classeFilter } : {}) }),
-    [classeFilter]
+  const [page, setPage] = useState(1);
+
+  // Reset page when filters change
+  useEffect(() => { setPage(1); }, [anneeActive, classeFilter, depFilter, spFilter]);
+
+  const { data, count, loading, error, reload } = useApi(
+    () => seanceService.list({
+      page_size: 25, page,
+      ...(anneeActive  ? { code_annee:  anneeActive.code_annee } : {}),
+      ...(classeFilter ? { code_classe: classeFilter } : {}),
+      ...(depFilter    ? { code_dep:    depFilter    } : {}),
+      ...(spFilter     ? { code_sp:     spFilter     } : {}),
+    }),
+    [page, anneeActive, classeFilter, depFilter, spFilter]
   );
   const { mutate: create } = useMutation(useCallback(d => seanceService.create(d), []));
   const { mutate: update } = useMutation(useCallback(d => seanceService.update(d.code_seance, d), []));
   const { mutate: remove } = useMutation(useCallback(d => seanceService.delete(d.code_seance), []));
 
   useEffect(() => {
-    api.get('/api/classes/?page_size=100').then(r => setClasses(r.data.results ?? r.data)).catch(() => {});
+    Promise.all([
+      api.get('/api/classes/?page_size=300'),
+      api.get('/api/departements/?page_size=100'),
+      api.get('/api/specialites/?page_size=200'),
+    ]).then(([cR, dR, sR]) => {
+      setAllClasses(cR.data.results ?? cR.data);
+      setDepartements(dR.data.results ?? dR.data);
+      const sps = sR.data.results ?? sR.data;
+      setSpecialites(sps);
+      setFilteredSp(sps);
+    }).catch(() => {});
   }, []);
+
+  // Filtre des spécialités selon le département sélectionné
+  useEffect(() => {
+    if (!depFilter) {
+      setFilteredSp(specialites);
+      setSpFilter('');
+      setClasseFilter('');
+    } else {
+      const f = specialites.filter(s => {
+        const d = typeof s.code_dep === 'object' ? s.code_dep?.code_dep : s.code_dep;
+        return d === depFilter;
+      });
+      setFilteredSp(f);
+      if (spFilter && !f.some(s => s.code_sp === spFilter)) setSpFilter('');
+    }
+  }, [depFilter, specialites]);
+
+  // Filtre des classes selon la spécialité (ou le département) sélectionné(e)
+  const filteredClasses = useMemo(() => {
+    if (spFilter) {
+      return allClasses.filter(c => {
+        const sp = typeof c.code_sp === 'object' ? c.code_sp?.code_sp : c.code_sp;
+        return sp === spFilter;
+      });
+    }
+    if (depFilter) {
+      const spOfDep = filteredSp.map(s => s.code_sp);
+      return allClasses.filter(c => {
+        const sp  = typeof c.code_sp  === 'object' ? c.code_sp?.code_sp   : c.code_sp;
+        const dep = typeof c.code_dep === 'object' ? c.code_dep?.code_dep : c.code_dep;
+        return spOfDep.includes(sp) || dep === depFilter;
+      });
+    }
+    return allClasses;
+  }, [allClasses, filteredSp, spFilter, depFilter]);
+
+  // Réinitialise classeFilter si la classe sélectionnée n'est plus dans la liste filtrée
+  useEffect(() => {
+    if (classeFilter && filteredClasses.length > 0) {
+      const still = filteredClasses.some(c => c.code_classe === classeFilter);
+      if (!still) setClasseFilter('');
+    }
+  }, [spFilter, depFilter]);
 
   const COLS = [
     { key: 'mat',    label: t.fields.matiere,   render: r => r.lib_matiere || r.code_matiere },
@@ -294,8 +356,7 @@ export default function Seances() {
     )},
   ];
 
-  if (loading) return <LoadingState />;
-  if (error)   return <ErrorState message={error} onRetry={reload} />;
+  if (error) return <ErrorState message={error} onRetry={reload} />;
 
   return (
     <>
@@ -305,17 +366,44 @@ export default function Seances() {
         icon="fas fa-calendar-check"
         columns={COLS}
         data={data || []}
+        loading={loading}
+        totalCount={count}
+        serverSide
+        serverPage={page}
+        serverPages={Math.max(1, Math.ceil((count || 0) / 25))}
+        onServerPage={setPage}
         addLabel={t.pages.seances.addLabel}
+        exportCsvUrl={`/api/seances/export-csv/${[classeFilter && `code_classe=${classeFilter}`, depFilter && `code_dep=${depFilter}`, spFilter && `code_sp=${spFilter}`].filter(Boolean).join('&') ? '?' + [classeFilter && `code_classe=${classeFilter}`, depFilter && `code_dep=${depFilter}`, spFilter && `code_sp=${spFilter}`].filter(Boolean).join('&') : ''}`}
         filters={
-          <div className="flex gap-2 items-center">
-            <label style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>{t.fields.classe} :</label>
-            <select className="sms-input" style={{ height: 34, minWidth: 160, fontSize: 12 }}
-              value={classeFilter} onChange={e => setClasseFilter(e.target.value)}>
-              <option value="">{t.common.allClasses}</option>
-              {classes.map(c => <option key={c.code_classe} value={c.code_classe}>{c.lib_classe}</option>)}
+          <div className="flex gap-2 items-center" style={{ flexWrap: 'wrap' }}>
+            <select className="sms-input" style={{ height: 34, minWidth: 180, fontSize: 12 }}
+              value={depFilter} onChange={e => setDepFilter(e.target.value)}>
+              <option value="">{t.common.allDepts}</option>
+              {departements.map(d => <option key={d.code_dep} value={d.code_dep}>{d.lib_dep}</option>)}
             </select>
-            {classeFilter && (
-              <button className="sms-btn-icon" onClick={() => setClasseFilter('')}>
+            <select className="sms-input" style={{ height: 34, minWidth: 180, fontSize: 12 }}
+              value={spFilter} onChange={e => setSpFilter(e.target.value)} disabled={!depFilter}>
+              <option value="">{t.common.allSp}</option>
+              {filteredSp.map(s => <option key={s.code_sp} value={s.code_sp}>{s.lib_sp}</option>)}
+            </select>
+            <select
+              className="sms-input"
+              style={{ height: 34, minWidth: 160, fontSize: 12 }}
+              value={classeFilter}
+              onChange={e => setClasseFilter(e.target.value)}
+              disabled={filteredClasses.length === 0 && (!!depFilter || !!spFilter)}
+            >
+              <option value="">
+                {t.common.allClasses}
+                {(depFilter || spFilter) && filteredClasses.length > 0
+                  ? ` (${filteredClasses.length})` : ''}
+              </option>
+              {filteredClasses.map(c => (
+                <option key={c.code_classe} value={c.code_classe}>{c.lib_classe}</option>
+              ))}
+            </select>
+            {(depFilter || spFilter || classeFilter) && (
+              <button className="sms-btn-icon" onClick={() => { setDepFilter(''); setSpFilter(''); setClasseFilter(''); }} title={t.common.reset}>
                 <i className="fas fa-times"></i>
               </button>
             )}

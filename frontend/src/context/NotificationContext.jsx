@@ -57,6 +57,25 @@ export function NotificationProvider({ children }) {
         }
       } catch { /* silencieux */ }
 
+      // Vérifier les années PLANIFIÉE sans dates (après un passage d'année)
+      try {
+        const anneeRes = await api.get('/api/annees/', { params: { statut: 'PLANIFIEE', page_size: 10 } });
+        const annees = anneeRes.data.results ?? anneeRes.data;
+        const sansDate = annees.filter(a => !a.date_deb || !a.date_fin);
+        sansDate.forEach(a => {
+          notifs.push({
+            id:      'annee-planifiee-' + a.code_annee,
+            type:    'warning',
+            icon:    'fas fa-calendar-plus',
+            title:   'Nouvelle année scolaire créée',
+            message: `L'année "${a.lib_annee || a.code_annee}" est planifiée mais ses dates ne sont pas encore définies.`,
+            link:    '/parametrage',
+            time:    new Date(),
+            read:    false,
+          });
+        });
+      } catch { /* silencieux */ }
+
       // Notification de bienvenue si aucune autre
       if (notifs.length === 0) {
         notifs.push({

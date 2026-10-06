@@ -50,11 +50,13 @@ export const classeService = {
 };
 
 // ── Référentiels ──────────────────────────────────────────────────────────────
+export const faculteService      = crud('/api/facultes');
 export const departementService  = crud('/api/departements');
 export const specialiteService   = crud('/api/specialites');
 export const anneeService = {
   ...crud('/api/annees'),
-  enCours: () => api.get('/api/annees/en-cours/'),
+  enCours:      ()  => api.get('/api/annees/en-cours/'),
+  passageAnnee: ()  => api.post('/api/annees/passage-annee/'),
 };
 export const periodeService      = crud('/api/periodes');
 export const matiereService      = crud('/api/matieres');
@@ -75,21 +77,37 @@ export const ueService           = crud('/api/unites-ens');
 export const qualificationService = crud('/api/qualifications');
 
 // ── Inscriptions ──────────────────────────────────────────────────────────────
-export const inscriptionService  = crud('/api/inscriptions');
+export const inscriptionService  = {
+  ...crud('/api/inscriptions'),
+  stats: (params = {}) => api.get('/api/inscriptions/stats/', { params }),
+};
 
 // ── Évaluations ───────────────────────────────────────────────────────────────
-export const evaluationService   = crud('/api/evaluations');
+export const evaluationService   = {
+  ...crud('/api/evaluations'),
+  // Moyennes pondérées par étudiant/matière (Contrôle continu 30% + Session normale 70%, etc.
+  // — pondération configurée par type d'évaluation dans Paramétrage). Repli automatique sur
+  // une moyenne simple côté backend si aucune pondération n'est configurée.
+  moyennes: (params) => api.get('/api/evaluations/moyennes/', { params }),
+};
 
 // ── Paiements ─────────────────────────────────────────────────────────────────
 export const paiementService = {
   ...crud('/api/paiements'),
-  parEtudiant: (mle) => api.get(`/api/paiements/par-etudiant/${mle}/`),
+  stats: (params = {}) => api.get('/api/paiements/stats/', { params }),
+};
+
+// ── Paiements de salaires (personnel) — séparé des frais de scolarité/inscription ─
+export const paiementSalaireService = {
+  ...crud('/api/paiements-salaires'),
+  stats: (params = {}) => api.get('/api/paiements-salaires/stats/', { params }),
 };
 
 // ── Factures ─────────────────────────────────────────────────────────────────
 export const factureService = {
   ...crud('/api/factures'),
   details: (id) => api.get(`/api/factures-detail/?code_facture=${id}`),
+  stats:   (params = {}) => api.get('/api/factures/stats/', { params }),
 };
 export const factureDetailService = crud('/api/factures-detail');
 export const rapportFinancierService = crud('/api/rapports-financiers');
@@ -114,7 +132,11 @@ export const absenceService = crud('/api/absences');
 // ── Planning ──────────────────────────────────────────────────────────────────
 export const planningService = {
   ...crud('/api/planning'),
-  parClasse: (code) => api.get(`/api/planning/classe/${code}/`),
+  parClasse:      (code) => api.get(`/api/planning/classe/${code}/`),
+  genererSeances: (date_lundi, code_annee) =>
+    api.post('/api/planning/generer-seances/', { date_lundi, code_annee }),
+  genererPeriode: (date_debut, date_fin, code_annee) =>
+    api.post('/api/planning/generer-periode/', { date_debut, date_fin, code_annee }),
 };
 
 // ── Examens & Convocations ────────────────────────────────────────────────────
@@ -124,10 +146,22 @@ export const examenService = {
 };
 export const convocationService = crud('/api/convocations');
 
+// ── Épreuves (sujets soumis par les enseignants, validés par la scolarité) ────
+export const epreuveService = {
+  ...crud('/api/epreuves'),
+  soumettre: (id)              => api.post(`/api/epreuves/${id}/soumettre/`),
+  valider:   (id)              => api.post(`/api/epreuves/${id}/valider/`),
+  rejeter:   (id, commentaire) => api.post(`/api/epreuves/${id}/rejeter/`, { commentaire }),
+};
+
 // ── Rapport statistique ───────────────────────────────────────────────────────
 export const rapportStatService = {
   ...crud('/api/rapports-stat'),
   generate: (data) => api.post('/api/rapports-stat/generate/', data),
+};
+export const rapportAssiduiteService = {
+  ...crud('/api/rapports-assiduite'),
+  generate: (data) => api.post('/api/rapports-assiduite/generate/', data),
 };
 
 // ── Décisions ─────────────────────────────────────────────────────────────────
@@ -144,6 +178,13 @@ export const documentGenereService = crud('/api/documents-generes');
 // ── Tuteurs ───────────────────────────────────────────────────────────────────
 export const tuteurService        = crud('/api/tuteurs');
 export const etudiantTuteurService = crud('/api/etudiant-tuteurs');
+
+// ── Personnel ─────────────────────────────────────────────────────────────────
+export const personnelService = {
+  ...crud('/api/personnel'),
+  signataires: () => api.get('/api/personnel/signataires/'),
+  exportCsv:   (params) => api.get('/api/personnel/export-csv/', { params }),
+};
 
 // ── Utilisateurs ──────────────────────────────────────────────────────────────
 export const utilisateurService   = crud('/api/utilisateurs');
@@ -164,6 +205,17 @@ export const etablissementService = {
 // ── Niveaux scolaires & Config bulletin ───────────────────────────────────────
 export const niveauScolaireService  = crud('/api/niveaux-scolaires');
 export const configBulletinService  = crud('/api/config-bulletin');
+
+// ── Import CSV ────────────────────────────────────────────────────────────────
+export const importCsvService = {
+  upload: (entityType, formData, onProgress) =>
+    api.post(`/api/import-csv/${entityType}/`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: onProgress,
+    }),
+  template: (entityType) =>
+    api.get(`/api/import-csv/${entityType}/template/`, { responseType: 'blob' }),
+};
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 export const dashboardService = {

@@ -21,4 +21,14 @@ export default defineConfig({
       'html2pdf.js',
     ],
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'charts':       ['chart.js', 'react-chartjs-2'],
+        },
+      },
+    },
+  },
 })

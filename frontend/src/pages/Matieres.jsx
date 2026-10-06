@@ -8,6 +8,8 @@ import { useApp } from '../context/AppContext';
 import { useApi, useMutation } from '../hooks/useApi';
 import { matiereService, moduleService } from '../services/endpoints';
 import { LoadingState, ErrorState } from '../components/ApiState';
+import { useEtablissement } from '../hooks/useEtablissement';
+import { etabLabels } from '../utils/etabLabels';
 
 // ── Modal gestion des modules ─────────────────────────────────────────────────
 function ModuleModal({ modules, onClose, onCreate, onUpdate, onDelete, reloadModules }) {
@@ -272,8 +274,15 @@ function ModuleModal({ modules, onClose, onCreate, onUpdate, onDelete, reloadMod
   );
 }
 
+const TYPE_ETAB_OPTIONS = [
+  { value: '',           label: '— Partagée (tous types) —' },
+  { value: 'PRIMAIRE',   label: 'Primaire uniquement' },
+  { value: 'SECONDAIRE', label: 'Secondaire uniquement' },
+  { value: 'SUPERIEUR',  label: 'Supérieur uniquement' },
+];
+
 // ── Formulaire matière ────────────────────────────────────────────────────────
-function MatiereForm({ item, onClose, onSave, modules }) {
+function MatiereForm({ item, onClose, onSave, modules, defaultTypeEtab }) {
   const { t } = useApp();
   const isEdit = Boolean(item);
 
@@ -282,6 +291,7 @@ function MatiereForm({ item, onClose, onSave, modules }) {
     lib_matiere:  item?.lib_matiere  || '',
     code_module:  item?.code_module?.code_module || item?.code_module || '',
     obs_matiere:  item?.obs_matiere  || '',
+    type_etab:    item?.type_etab    || defaultTypeEtab || '',
   });
   const ch = e => setF(prev => ({ ...prev, [e.target.name]: e.target.value }));
 
@@ -309,7 +319,7 @@ function MatiereForm({ item, onClose, onSave, modules }) {
           )}
         </div>
         <FormField
-          label="Libellé *"
+          label={t.fields.libelle}
           name="lib_matiere"
           value={f.lib_matiere}
           onChange={ch}
@@ -331,18 +341,28 @@ function MatiereForm({ item, onClose, onSave, modules }) {
         }))}
       />
 
-      <div>
-        <label className="sms-label">{t.fields.obs}</label>
-        <textarea
-          className="sms-input"
-          name="obs_matiere"
-          value={f.obs_matiere}
+      <div className="sms-form-row">
+        <FormField
+          label={t.nav.typeEtab}
+          name="type_etab"
+          type="select"
+          value={f.type_etab}
           onChange={ch}
-          maxLength={45}
-          placeholder={t.common.obsPlaceholder}
-          rows={2}
-          style={{ resize: 'vertical', minHeight: 60 }}
+          options={TYPE_ETAB_OPTIONS}
         />
+        <div>
+          <label className="sms-label">{t.fields.obs}</label>
+          <textarea
+            className="sms-input"
+            name="obs_matiere"
+            value={f.obs_matiere}
+            onChange={ch}
+            maxLength={45}
+            placeholder={t.common.obsPlaceholder}
+            rows={2}
+            style={{ resize: 'vertical', minHeight: 60 }}
+          />
+        </div>
       </div>
 
       <div className="sms-modal-footer" style={{ padding: '14px 0 0', border: 'none' }}>
@@ -358,8 +378,13 @@ function MatiereForm({ item, onClose, onSave, modules }) {
 }
 
 // ── Page principale ───────────────────────────────────────────────────────────
+const TYPE_COLORS_MAP = { PRIMAIRE:'#4caf50', SECONDAIRE:'#2196f3', SUPERIEUR:'#9c27b0' };
+const TYPE_LABELS_MAP = { PRIMAIRE:'Primaire', SECONDAIRE:'Secondaire', SUPERIEUR:'Supérieur' };
+
 export default function Matieres() {
-  const { t, toast } = useApp();
+  const { t, toast, lang } = useApp();
+  const { typeEtab, systeme } = useEtablissement();
+  const labels = etabLabels(typeEtab, systeme, lang);
   const [moduleFilter,    setModuleFilter]    = useState('');
   const [search,          setSearch]          = useState('');
   const [showModuleModal, setShowModuleModal] = useState(false);
@@ -438,6 +463,18 @@ export default function Matieres() {
       },
     },
     {
+      key: 'type',
+      label: "Type étab.",
+      render: r => r.type_etab
+        ? <span style={{
+            fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 8,
+            background: `${TYPE_COLORS_MAP[r.type_etab] || '#888'}20`,
+            color: TYPE_COLORS_MAP[r.type_etab] || '#888',
+            border: `1px solid ${TYPE_COLORS_MAP[r.type_etab] || '#888'}40`,
+          }}>{TYPE_LABELS_MAP[r.type_etab]}</span>
+        : <span style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>Partagée</span>,
+    },
+    {
       key: 'obs',
       label: t.pages.matieres.cols.observations,
       render: r => r.obs_matiere
@@ -466,11 +503,11 @@ export default function Matieres() {
           <div><div className="stat-value">{filtered.length}</div><div className="stat-label">{t.pages.matieres.affichees}</div></div>
         </div>
         {parModule[0] && (
-          <div className="stat-card" style={{ '--c': '#7c3aed' }}>
-            <div className="stat-icon" style={{ background: '#7c3aed22', color: '#7c3aed' }}>
+          <div className="stat-card c-purple">
+            <div className="stat-icon c-purple">
               <i className="fas fa-star"></i>
             </div>
-            <div>
+            <div style={{ minWidth: 0 }}>
               <div className="stat-value" style={{ fontSize: 15 }}>{parModule[0][1]}</div>
               <div className="stat-label" style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {parModule[0][0]}
@@ -578,7 +615,7 @@ export default function Matieres() {
           try { await deleteMatiere(d); toast.success(t.pages.matieres.matiereDeleted); reload(); }
           catch (e) { toast.error(e.message); }
         }}
-        renderForm={p => <MatiereForm {...p} modules={modules} />}
+        renderForm={p => <MatiereForm {...p} modules={modules} defaultTypeEtab={typeEtab} />}
       />
 
       {/* ── Modal modules ── */}

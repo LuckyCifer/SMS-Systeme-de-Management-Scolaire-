@@ -1,4 +1,4 @@
-/**
+﻿/**
  * pages/Parametrage.jsx
  * Paramétrage général — référentiels du système en 5 onglets.
  *
@@ -9,6 +9,8 @@ import { useState, useCallback } from 'react';
 import { FormField } from '../components/CrudTable';
 import { useApp } from '../context/AppContext';
 import { useApi, useMutation } from '../hooks/useApi';
+import { useEtablissement } from '../hooks/useEtablissement';
+import { etabLabels } from '../utils/etabLabels';
 import {
   anneeService, periodeService,
   cycleService, niveauService, departementService, specialiteService,
@@ -99,17 +101,22 @@ function RefSection({ title, icon, color = 'var(--green)', items = [], loading =
             {t.pages.parametrage.noRecord}
           </div>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-            <thead>
-              <tr style={{ background: 'var(--bg-hover)' }}>
+          <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, fontSize: 12 }}>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
+              <tr style={{ background: 'var(--bg-card)' }}>
                 {columns.map(c => (
                   <th key={c.label} style={{ padding: '7px 14px', textAlign: 'left',
                     fontSize: 10, fontWeight: 700, color: 'var(--text-muted)',
-                    textTransform: 'uppercase', letterSpacing: .5, whiteSpace: 'nowrap' }}>
+                    textTransform: 'uppercase', letterSpacing: .5, whiteSpace: 'nowrap',
+                    borderBottom: '1px solid var(--border)', background: 'var(--bg-card)' }}>
                     {c.label}
                   </th>
                 ))}
-                <th style={{ width: 72 }} />
+                <th style={{ width: 72, borderBottom: '1px solid var(--border)', background: 'var(--bg-card)',
+                  padding: '7px 14px', textAlign: 'left', fontSize: 10, fontWeight: 700,
+                  color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: .5 }}>
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -223,8 +230,8 @@ function AnneeForm({ item, onClose, onSave, saving }) {
         <FormField label={t.fields.libelle} name="lib_annee" value={f.lib_annee} onChange={ch} placeholder="Ex : Année 2025-2026" />
       </div>
       <div className="sms-form-row">
-        <FormField label={t.fields.dateDebut} name="date_deb" type="date" value={f.date_deb} onChange={ch} />
-        <FormField label={t.fields.dateFin}   name="date_fin" type="date" value={f.date_fin} onChange={ch} />
+        <FormField label={t.fields.dateDebut} name="date_deb" type="date" value={f.date_deb} onChange={ch} help="Format : JJ/MM/AAAA" />
+        <FormField label={t.fields.dateFin}   name="date_fin" type="date" value={f.date_fin} onChange={ch} help="Format : JJ/MM/AAAA" />
       </div>
       <div className="sms-form-row">
         <FormField label={t.fields.statut} name="statut" type="select" value={f.statut} onChange={ch} options={STATUTS_ANNEE} />
@@ -235,42 +242,52 @@ function AnneeForm({ item, onClose, onSave, saving }) {
   );
 }
 
-function PeriodeForm({ item, onClose, onSave, saving, annees }) {
+function PeriodeForm({ item, onClose, onSave, saving, annees, defaultTypeEtab }) {
   const { t } = useApp();
-  const isEdit = Boolean(item);
   const [f, setF] = useState({
-    code_periode: item?.code_periode || '',
     lib_periode:  item?.lib_periode  || '',
     date_debut:   item?.date_debut?.slice(0, 10) || '',
     date_fin:     item?.date_fin?.slice(0, 10)   || '',
     code_annee:   item?.code_annee  || '',
     obs_periode:  item?.obs_periode || '',
+    type_etab:    item?.type_etab   || defaultTypeEtab || '',
+    type_periode: item?.type_periode || 'ORDINAIRE',
   });
   const ch = e => setF(p => ({ ...p, [e.target.name]: e.target.value }));
   return (
-    <form onSubmit={e => { e.preventDefault(); onSave({ ...f, code_annee: f.code_annee || null }); }}>
+    <form onSubmit={e => { e.preventDefault(); onSave({ ...f, code_annee: f.code_annee || null, type_etab: f.type_etab || null }); }}>
+      <FormField label={`${t.fields.libelle} *`} name="lib_periode" value={f.lib_periode} onChange={ch} required placeholder="Ex : Trimestre 1" />
       <div className="sms-form-row">
-        <div>
-          <label className="sms-label">Code <span style={{ color: 'var(--danger)' }}>*</span></label>
-          <input className="sms-input" name="code_periode" value={f.code_periode} onChange={ch}
-            required maxLength={10} placeholder="Ex : S1"
-            disabled={isEdit} style={isEdit ? { opacity: .6, cursor: 'not-allowed' } : {}} />
-        </div>
-        <FormField label={`${t.fields.libelle} *`} name="lib_periode" value={f.lib_periode} onChange={ch} required placeholder="Ex : Semestre 1" />
+        <FormField label={t.fields.dateDebut} name="date_debut" type="date" value={f.date_debut} onChange={ch} help="Format : JJ/MM/AAAA" />
+        <FormField label={t.fields.dateFin}   name="date_fin"   type="date" value={f.date_fin}   onChange={ch} help="Format : JJ/MM/AAAA" />
       </div>
       <div className="sms-form-row">
-        <FormField label={t.fields.dateDebut} name="date_debut" type="date" value={f.date_debut} onChange={ch} />
-        <FormField label={t.fields.dateFin}   name="date_fin"   type="date" value={f.date_fin}   onChange={ch} />
+        <FormField label={t.fields.annee} name="code_annee" type="select" value={f.code_annee} onChange={ch}
+          options={(annees || []).map(a => ({ value: a.code_annee, label: a.lib_annee || a.code_annee }))} />
+        <FormField label={t.nav.typeEtab} name="type_etab" type="select"
+          value={f.type_etab} onChange={ch} options={TYPE_ETAB_OPTS_PARAM} />
       </div>
-      <FormField label={t.fields.annee} name="code_annee" type="select" value={f.code_annee} onChange={ch}
-        options={(annees || []).map(a => ({ value: a.code_annee, label: a.lib_annee || a.code_annee }))} />
+      {/* Repère la période d'examens officiels (CEP/BEPC/Probatoire/Bac/GCE…, mi-mai à
+          fin juillet) distinctement d'une séquence/trimestre ordinaire. */}
+      <FormField label="Type de période" name="type_periode" type="select" value={f.type_periode} onChange={ch}
+        options={[
+          { value: 'ORDINAIRE',         label: 'Séquence / trimestre ordinaire' },
+          { value: 'EXAMENS_OFFICIELS', label: "Période d'examens officiels" },
+        ]} />
       <FormField label={t.fields.obs} name="obs_periode" value={f.obs_periode} onChange={ch} />
       <FormFooter onClose={onClose} saving={saving} />
     </form>
   );
 }
 
-function CycleForm({ item, onClose, onSave, saving, pensions }) {
+const TYPE_ETAB_OPTS_PARAM = [
+  { value: '',           label: '— Partagé (tous types) —' },
+  { value: 'PRIMAIRE',   label: 'Primaire' },
+  { value: 'SECONDAIRE', label: 'Secondaire' },
+  { value: 'SUPERIEUR',  label: 'Supérieur' },
+];
+
+function CycleForm({ item, onClose, onSave, saving, pensions, defaultTypeEtab }) {
   const { t } = useApp();
   const isEdit = Boolean(item);
   const [f, setF] = useState({
@@ -278,10 +295,11 @@ function CycleForm({ item, onClose, onSave, saving, pensions }) {
     lib_cycle:    item?.lib_cycle    || '',
     code_pension: item?.code_pension || '',
     obs_cycle:    item?.obs_cycle    || '',
+    type_etab:    item?.type_etab    || defaultTypeEtab || '',
   });
   const ch = e => setF(p => ({ ...p, [e.target.name]: e.target.value }));
   return (
-    <form onSubmit={e => { e.preventDefault(); onSave({ ...f, code_pension: f.code_pension || null }); }}>
+    <form onSubmit={e => { e.preventDefault(); onSave({ ...f, code_pension: f.code_pension || null, type_etab: f.type_etab || null }); }}>
       <div className="sms-form-row">
         <div>
           <label className="sms-label">Code <span style={{ color: 'var(--danger)' }}>*</span></label>
@@ -291,15 +309,19 @@ function CycleForm({ item, onClose, onSave, saving, pensions }) {
         </div>
         <FormField label={`${t.fields.libelle} *`} name="lib_cycle" value={f.lib_cycle} onChange={ch} required placeholder="Ex : Licence" />
       </div>
-      <FormField label={t.pages.parametrage.regime} name="code_pension" type="searchable" value={f.code_pension} onChange={ch}
-        options={(pensions || []).map(p => ({ value: p.code_pension, label: p.lib_pension || `Pension ${p.code_pension}` }))} />
+      <div className="sms-form-row">
+        <FormField label={t.nav.typeEtab} name="type_etab" type="select"
+          value={f.type_etab} onChange={ch} options={TYPE_ETAB_OPTS_PARAM} />
+        <FormField label={t.pages.parametrage.regime} name="code_pension" type="searchable" value={f.code_pension} onChange={ch}
+          options={(pensions || []).map(p => ({ value: p.code_pension, label: p.lib_pension || `Pension ${p.code_pension}` }))} />
+      </div>
       <FormField label={t.fields.obs} name="obs_cycle" value={f.obs_cycle} onChange={ch} />
       <FormFooter onClose={onClose} saving={saving} />
     </form>
   );
 }
 
-function NiveauForm({ item, onClose, onSave, saving, cycles, pensions, annees }) {
+function NiveauForm({ item, onClose, onSave, saving, cycles, pensions, annees, defaultTypeEtab }) {
   const { t } = useApp();
   const [f, setF] = useState({
     lib_niveau:   item?.lib_niveau   || '',
@@ -307,6 +329,7 @@ function NiveauForm({ item, onClose, onSave, saving, cycles, pensions, annees })
     code_pension: item?.code_pension || '',
     code_annee:   item?.code_annee   || '',
     obs_niveau:   item?.obs_niveau   || '',
+    type_etab:    item?.type_etab    || defaultTypeEtab || '',
   });
   const ch = e => setF(p => ({ ...p, [e.target.name]: e.target.value }));
   return (
@@ -315,16 +338,21 @@ function NiveauForm({ item, onClose, onSave, saving, cycles, pensions, annees })
       code_cycle:   f.code_cycle   || null,
       code_pension: f.code_pension || null,
       code_annee:   f.code_annee   || null,
+      type_etab:    f.type_etab    || null,
     }); }}>
       <FormField label={`${t.fields.libelle} *`} name="lib_niveau" value={f.lib_niveau} onChange={ch} required placeholder="Ex : Licence 1" />
       <div className="sms-form-row">
+        <FormField label={t.nav.typeEtab} name="type_etab" type="select"
+          value={f.type_etab} onChange={ch} options={TYPE_ETAB_OPTS_PARAM} />
         <FormField label={t.pages.parametrage.cols.cycle} name="code_cycle" type="select" value={f.code_cycle} onChange={ch}
           options={(cycles || []).map(c => ({ value: c.code_cycle, label: c.lib_cycle }))} />
+      </div>
+      <div className="sms-form-row">
         <FormField label={t.pages.parametrage.regime} name="code_pension" type="select" value={f.code_pension} onChange={ch}
           options={(pensions || []).map(p => ({ value: p.code_pension, label: p.lib_pension || `Pension ${p.code_pension}` }))} />
+        <FormField label={t.fields.annee} name="code_annee" type="select" value={f.code_annee} onChange={ch}
+          options={(annees || []).map(a => ({ value: a.code_annee, label: a.lib_annee || a.code_annee }))} />
       </div>
-      <FormField label={t.fields.annee} name="code_annee" type="select" value={f.code_annee} onChange={ch}
-        options={(annees || []).map(a => ({ value: a.code_annee, label: a.lib_annee || a.code_annee }))} />
       <FormField label={t.fields.obs} name="obs_niveau" value={f.obs_niveau} onChange={ch} />
       <FormFooter onClose={onClose} saving={saving} />
     </form>
@@ -354,7 +382,9 @@ function DepartementForm({ item, onClose, onSave, saving }) {
 }
 
 function SpecialiteForm({ item, onClose, onSave, saving, departements }) {
-  const { t } = useApp();
+  const { t, lang } = useApp();
+  const { typeEtab, systeme } = useEtablissement();
+  const labels = etabLabels(typeEtab, systeme, lang);
   const isEdit = Boolean(item);
   const [f, setF] = useState({
     code_sp:  item?.code_sp  || '',
@@ -374,7 +404,7 @@ function SpecialiteForm({ item, onClose, onSave, saving, departements }) {
         </div>
         <FormField label={`${t.fields.libelle} *`} name="lib_sp" value={f.lib_sp} onChange={ch} required placeholder="Ex : Génie Informatique" />
       </div>
-      <FormField label={`${t.fields.departement2} *`} name="code_dep" type="searchable" value={f.code_dep} onChange={ch} required
+      <FormField label={`${labels.departementLabel} *`} name="code_dep" type="searchable" value={f.code_dep} onChange={ch} required
         options={(departements || []).map(d => ({ value: d.code_dep, label: `${d.code_dep} — ${d.lib_dep}` }))} />
       <FormField label={t.fields.obs} name="obs_sp" value={f.obs_sp} onChange={ch} />
       <FormFooter onClose={onClose} saving={saving} />
@@ -426,13 +456,36 @@ function SalleForm({ item, onClose, onSave, saving }) {
   );
 }
 
-function TypeEvalForm({ item, onClose, onSave, saving }) {
+function TypeEvalForm({ item, onClose, onSave, saving, defaultTypeEtab, typeEvals = [] }) {
   const { t } = useApp();
-  const [f, setF] = useState({ lib_type_eval: item?.lib_type_eval || '', obs_type_eval: item?.obs_type_eval || '' });
+  const [f, setF] = useState({
+    lib_type_eval: item?.lib_type_eval || '',
+    obs_type_eval: item?.obs_type_eval || '',
+    type_etab:     item?.type_etab     || defaultTypeEtab || '',
+    ponderation:   item?.ponderation ?? '',
+    remplace:      item?.remplace ?? '',
+  });
   const ch = e => setF(p => ({ ...p, [e.target.name]: e.target.value }));
+  const autresTypes = typeEvals.filter(te => te.code_type_eval !== item?.code_type_eval);
   return (
-    <form onSubmit={e => { e.preventDefault(); onSave(f); }}>
-      <FormField label={`${t.fields.libelle} *`} name="lib_type_eval" value={f.lib_type_eval} onChange={ch} required placeholder="Ex : Contrôle continu" />
+    <form onSubmit={e => { e.preventDefault(); onSave({
+      ...f,
+      type_etab:   f.type_etab || null,
+      ponderation: f.ponderation === '' ? null : f.ponderation,
+      remplace:    f.remplace === '' ? null : f.remplace,
+    }); }}>
+      <FormField label={`${t.fields.libelle} *`} name="lib_type_eval" value={f.lib_type_eval} onChange={ch} required placeholder="Ex : Devoir Surveillé" />
+      <div className="sms-form-row">
+        <FormField label={t.nav.typeEtab} name="type_etab" type="select"
+          value={f.type_etab} onChange={ch} options={TYPE_ETAB_OPTS_PARAM} />
+        <FormField label="Pondération (%)" name="ponderation" type="number"
+          value={f.ponderation} onChange={ch} placeholder="Ex : 30"
+          help="Poids dans la moyenne de la période (ex : Contrôle continu 30% + Session normale 70%). Laisser vide si non pondéré." />
+      </div>
+      <FormField label="Remplace" name="remplace" type="select"
+        value={f.remplace} onChange={ch}
+        options={autresTypes.map(te => ({ value: te.code_type_eval, label: te.lib_type_eval }))}
+        help="Si une note existe pour ce type, elle remplace — au lieu de s'ajouter à — la note du type sélectionné ici (ex : Rattrapage remplace Session normale)." />
       <FormField label={t.fields.obs} name="obs_type_eval" value={f.obs_type_eval} onChange={ch} />
       <FormFooter onClose={onClose} saving={saving} />
     </form>
@@ -461,37 +514,29 @@ function JourForm({ item, onClose, onSave, saving }) {
   );
 }
 
-function PensionForm({ item, onClose, onSave, saving }) {
+function PensionForm({ item, onClose, onSave, saving, defaultTypeEtab }) {
   const { t } = useApp();
-  const isEdit = Boolean(item);
   const [f, setF] = useState({
-    code_pension:   item?.code_pension   || '',
     lib_pension:    item?.lib_pension    || '',
     mt_pension:     item?.mt_pension     || 0,
     mt_inscription: item?.mt_inscription || 0,
     nb_tranche:     item?.nb_tranche     || '',
     obs_pension:    item?.obs_pension    || '',
+    type_etab:      item?.type_etab      || defaultTypeEtab || '',
   });
   const ch = e => setF(p => ({ ...p, [e.target.name]: e.target.value }));
   return (
-    <form onSubmit={e => { e.preventDefault(); onSave({ ...f, nb_tranche: f.nb_tranche || null }); }}>
-      <div className="sms-form-row">
-        <div>
-          <label className="sms-label">Code <span style={{ color: 'var(--danger)' }}>*</span></label>
-          <input className="sms-input" name="code_pension" value={f.code_pension} onChange={ch}
-            required type="number" min={1} placeholder="Ex : 1"
-            disabled={isEdit} style={isEdit ? { opacity: .6, cursor: 'not-allowed' } : {}} />
-        </div>
-        <FormField label={t.fields.libelle} name="lib_pension" value={f.lib_pension} onChange={ch} placeholder="Ex : Licence — Informatique" />
-      </div>
+    <form onSubmit={e => { e.preventDefault(); onSave({ ...f, nb_tranche: f.nb_tranche || null, type_etab: f.type_etab || null }); }}>
+      <FormField label={`${t.fields.libelle} *`} name="lib_pension" value={f.lib_pension} onChange={ch} required placeholder="Ex : Scolarité Terminale C" />
       <div className="sms-form-row">
         <FormField label={t.pages.parametrage.scolariteField}   name="mt_pension"     type="number" value={f.mt_pension}     onChange={ch} required />
         <FormField label={t.pages.parametrage.inscriptionField} name="mt_inscription" type="number" value={f.mt_inscription} onChange={ch} />
       </div>
       <div className="sms-form-row">
         <FormField label={t.pages.parametrage.nbTranches} name="nb_tranche" type="number" value={f.nb_tranche} onChange={ch} placeholder="Ex : 3" />
-        <FormField label={t.fields.obs}                   name="obs_pension" value={f.obs_pension} onChange={ch} />
+        <FormField label={t.nav.typeEtab}           name="type_etab"  type="select" value={f.type_etab} onChange={ch} options={TYPE_ETAB_OPTS_PARAM} />
       </div>
+      <FormField label={t.fields.obs} name="obs_pension" value={f.obs_pension} onChange={ch} />
       <FormFooter onClose={onClose} saving={saving} />
     </form>
   );
@@ -562,7 +607,9 @@ const S = { 'EN COURS': 'badge-success', PLANIFIEE: 'badge-info', CLOTUREE: 'bad
 const fmt = n => Number(n || 0).toLocaleString('fr-FR');
 
 function CalendrierTab() {
-  const { t } = useApp();
+  const { t, lang, toast, user } = useApp();
+  const { typeEtab, systeme } = useEtablissement();
+  const labels = etabLabels(typeEtab, systeme, lang);
   const { data: annees,   reload: reA } = useApi(useCallback(() => anneeService.list({ page_size: 100 }), []));
   const { data: periodes, reload: reP } = useApi(useCallback(() => periodeService.list({ page_size: 200 }), []));
   const { mutate: cA } = useMutation(useCallback(d => anneeService.create(d), []));
@@ -572,8 +619,107 @@ function CalendrierTab() {
   const { mutate: uP } = useMutation(useCallback(d => periodeService.update(d.code_periode, d), []));
   const { mutate: dP } = useMutation(useCallback(d => periodeService.delete(d.code_periode), []));
 
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [passingYear, setPassingYear] = useState(false);
+
+  const canDoPassage  = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
+  const anneeEnCours  = (annees || []).find(a => a.statut === 'EN COURS');
+
+  const handlePassageAnnee = async () => {
+    setPassingYear(true);
+    try {
+      const res = await anneeService.passageAnnee();
+      setShowConfirm(false);
+      toast.success(res.data.message || 'Passage d\'année effectué.');
+      reA();
+    } catch (err) {
+      const detail = err?.response?.data?.detail || 'Erreur lors du passage d\'année.';
+      toast.error(detail);
+      setShowConfirm(false);
+    } finally {
+      setPassingYear(false);
+    }
+  };
+
   return (
     <div>
+      {/* ── Bandeau Passage d'année (ADMIN / SUPER_ADMIN uniquement) ─────────── */}
+      {canDoPassage && (
+        <div style={{
+          background: 'var(--bg-card)', border: '1px solid var(--border)',
+          borderRadius: 10, padding: '14px 20px', marginBottom: 16,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          flexWrap: 'wrap', gap: 12,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ width: 36, height: 36, borderRadius: 8, background: '#1F386415',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <i className="fas fa-calendar-check" style={{ color: '#1F3864', fontSize: 16 }} />
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-primary)' }}>
+                {t.pages.parametrage.passage.title}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                {anneeEnCours
+                  ? (() => { const [before, after] = t.pages.parametrage.passage.desc.split('{annee}'); return <>{before}<strong>{anneeEnCours.lib_annee || anneeEnCours.code_annee}</strong>{after}</>; })()
+                  : <span style={{ color: 'var(--warning)' }}>{t.pages.parametrage.passage.noAnnee}</span>}
+              </div>
+            </div>
+          </div>
+          {anneeEnCours && (
+            <button className="sms-btn sms-btn-primary sms-btn-sm"
+              onClick={() => setShowConfirm(true)} style={{ whiteSpace: 'nowrap' }}>
+              <i className="fas fa-forward" style={{ marginRight: 6 }} />
+              {t.pages.parametrage.passage.btn}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ── Dialog de confirmation ─────────────────────────────────────────── */}
+      {showConfirm && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+          <div style={{ background: 'var(--bg-card)', borderRadius: 12, padding: 28,
+            maxWidth: 460, width: '90%', boxShadow: '0 8px 32px rgba(0,0,0,.25)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+              <div style={{ width: 42, height: 42, borderRadius: 10, background: '#FFF3CD',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <i className="fas fa-exclamation-triangle" style={{ color: '#856404', fontSize: 18 }} />
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text-primary)' }}>
+                  {t.pages.parametrage.passage.confirmTitle}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t.pages.parametrage.passage.confirmSub}</div>
+              </div>
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 20, lineHeight: 1.7 }}>
+              <p>{t.pages.parametrage.passage.confirmBody}</p>
+              <ul style={{ marginTop: 8, paddingLeft: 20 }}>
+                <li>{(() => { const [before, after] = t.pages.parametrage.passage.step1.split('{annee}'); return <>{before}<strong>{anneeEnCours?.lib_annee || anneeEnCours?.code_annee}</strong>{after}</>; })()}</li>
+                <li>{t.pages.parametrage.passage.step2}</li>
+                <li>{t.pages.parametrage.passage.step3}</li>
+              </ul>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button className="sms-btn sms-btn-outline sms-btn-sm"
+                onClick={() => setShowConfirm(false)} disabled={passingYear}>
+                {t.pages.parametrage.passage.cancel}
+              </button>
+              <button className="sms-btn sms-btn-primary sms-btn-sm"
+                onClick={handlePassageAnnee} disabled={passingYear}
+                style={{ background: '#1F3864', borderColor: '#1F3864' }}>
+                {passingYear
+                  ? <><div className="sms-spinner" style={{ width: 12, height: 12, display: 'inline-block', marginRight: 6 }} />{t.pages.parametrage.passage.processing}</>
+                  : <><i className="fas fa-check" style={{ marginRight: 6 }} />{t.pages.parametrage.passage.confirm}</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <RefSection title={t.pages.parametrage.sections.annees} icon="fas fa-calendar-alt" color="#4caf50"
         items={annees || []} FormComponent={AnneeForm}
         columns={[
@@ -590,16 +736,22 @@ function CalendrierTab() {
         onDelete={async d => { await dA(d); reA(); }}
       />
       <RefSection title={t.pages.parametrage.sections.periodes} icon="fas fa-clock" color="#42a5f5"
-        items={periodes || []} FormComponent={PeriodeForm} formProps={{ annees: annees || [] }}
+        items={periodes || []} FormComponent={PeriodeForm}
+        formProps={{ annees: annees || [], defaultTypeEtab: typeEtab }}
         columns={[
-          { label: t.common.colLabel, render: r => <strong>{r.lib_periode}</strong> },
-          { label: t.common.colStart, render: r => r.date_debut?.slice(0, 10) || '—' },
-          { label: t.common.colEnd,   render: r => r.date_fin?.slice(0, 10)   || '—' },
-          { label: t.common.colYear,  render: r => r.lib_annee || r.code_annee || '—' },
-          { label: t.common.colObs,   render: r => <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>{r.obs_periode || '—'}</span> },
+          { label: t.common.colLabel,  render: r => <strong>{r.lib_periode}</strong> },
+          { label: t.common.colStart,  render: r => r.date_debut?.slice(0, 10) || '—' },
+          { label: t.common.colEnd,    render: r => r.date_fin?.slice(0, 10)   || '—' },
+          { label: t.common.colYear,   render: r => r.lib_annee || r.code_annee || '—' },
+          { label: "Type",             render: r => r.type_etab
+              ? <span className="sms-badge badge-info" style={{ fontSize: 10 }}>{r.type_etab}</span>
+              : <span style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>Partagée</span> },
+          { label: "Nature",           render: r => r.type_periode === 'EXAMENS_OFFICIELS'
+              ? <span className="sms-badge badge-purple" style={{ fontSize: 10 }}><i className="fas fa-graduation-cap"></i> Examens officiels</span>
+              : <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Ordinaire</span> },
         ]}
         onAdd={async d => { await cP(d); reP(); }}
-        onEdit={async d => { await uP(d); reP(); }}
+        onEdit={async d => { const { code_periode, ...rest } = d; await uP({ code_periode, ...rest }); reP(); }}
         onDelete={async d => { await dP(d); reP(); }}
       />
     </div>
@@ -607,7 +759,9 @@ function CalendrierTab() {
 }
 
 function StructureTab() {
-  const { t } = useApp();
+  const { t, lang } = useApp();
+  const { typeEtab, systeme } = useEtablissement();
+  const labels = etabLabels(typeEtab, systeme, lang);
   const { data: cycles,  reload: reC }  = useApi(useCallback(() => cycleService.list({ page_size: 100 }), []));
   const { data: niveaux, reload: reN }  = useApi(useCallback(() => niveauService.list({ page_size: 100 }), []));
   const { data: deps,    reload: reD }  = useApi(useCallback(() => departementService.list({ page_size: 100 }), []));
@@ -630,12 +784,17 @@ function StructureTab() {
   return (
     <div>
       <RefSection title={t.pages.parametrage.sections.cycles} icon="fas fa-redo-alt" color="#ab47bc"
-        items={cycles || []} FormComponent={CycleForm} formProps={{ pensions: pensions || [] }}
+        items={cycles || []} FormComponent={CycleForm}
+        formProps={{ pensions: pensions || [], defaultTypeEtab: typeEtab }}
         columns={[
-          { label: t.common.colCode,                    render: r => <strong style={{ color: '#ab47bc' }}>{r.code_cycle}</strong> },
-          { label: t.common.colLabel,                   render: r => r.lib_cycle },
-          { label: t.pages.parametrage.cols.pension,    render: r => r.lib_pension || r.code_pension || '—' },
-          { label: t.common.colObs,                     render: r => <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>{r.obs_cycle || '—'}</span> },
+          { label: t.common.colCode,                 render: r => <strong style={{ color: '#ab47bc' }}>{r.code_cycle}</strong> },
+          { label: t.common.colLabel,                render: r => r.lib_cycle },
+          { label: t.pages.parametrage.cols.pension, render: r => r.lib_pension || r.code_pension || '—' },
+          { label: "Type étab.", render: r => r.type_etab
+            ? <span style={{ fontSize:10, fontWeight:700, padding:'2px 6px', borderRadius:8, background:'rgba(171,71,188,.15)', color:'#ab47bc', border:'1px solid rgba(171,71,188,.3)' }}>{r.type_etab}</span>
+            : <span style={{ fontSize:10, color:'var(--text-muted)' }}>Partagé</span>
+          },
+          { label: t.common.colObs, render: r => <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>{r.obs_cycle || '—'}</span> },
         ]}
         onAdd={async d => { await cC(d); reC(); }}
         onEdit={async d => { await uC(d); reC(); }}
@@ -643,10 +802,10 @@ function StructureTab() {
       />
       <RefSection title={t.pages.parametrage.sections.niveaux} icon="fas fa-layer-group" color="#ffa726"
         items={niveaux || []} FormComponent={NiveauForm}
-        formProps={{ cycles: cycles || [], pensions: pensions || [], annees: annees || [] }}
+        formProps={{ cycles: cycles || [], pensions: pensions || [], annees: annees || [], defaultTypeEtab: typeEtab }}
         columns={[
-          { label: t.common.colLabel,                   render: r => <strong>{r.lib_niveau}</strong> },
-          { label: t.pages.parametrage.cols.cycle,      render: r => r.lib_cycle   || r.code_cycle   || '—' },
+          { label: t.common.colLabel, render: r => <strong>{r.lib_niveau}</strong> },
+          { label: t.pages.parametrage.cols.cycle, render: r => r.lib_cycle || r.code_cycle || '—' },
           { label: t.pages.parametrage.cols.pension,    render: r => r.lib_pension || r.code_pension || '—' },
           { label: t.common.colYear,                    render: r => r.code_annee  || '—' },
         ]}
@@ -654,29 +813,39 @@ function StructureTab() {
         onEdit={async d => { await uN(d); reN(); }}
         onDelete={async d => { await dN(d); reN(); }}
       />
-      <RefSection title={t.pages.parametrage.sections.departements} icon="fas fa-sitemap" color="#26c6da"
-        items={deps || []} FormComponent={DepartementForm}
-        columns={[
-          { label: t.common.colCode,  render: r => <strong style={{ color: '#26c6da' }}>{r.code_dep}</strong> },
-          { label: t.common.colLabel, render: r => r.lib_dep },
-          { label: t.common.colObs,   render: r => <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>{r.obs_dep || '—'}</span> },
-        ]}
-        onAdd={async d => { await cD(d); reD(); }}
-        onEdit={async d => { await uD(d); reD(); }}
-        onDelete={async d => { await dD(d); reD(); }}
-      />
-      <RefSection title={t.pages.parametrage.sections.specialites} icon="fas fa-graduation-cap" color="#66bb6a"
-        items={specs || []} FormComponent={SpecialiteForm} formProps={{ departements: deps || [] }}
-        columns={[
-          { label: t.common.colCode,  render: r => <strong style={{ color: '#66bb6a' }}>{r.code_sp}</strong> },
-          { label: t.common.colLabel, render: r => r.lib_sp },
-          { label: t.common.colDept,  render: r => r.lib_dep || r.code_dep || '—' },
-          { label: t.common.colObs,   render: r => <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>{r.obs_sp || '—'}</span> },
-        ]}
-        onAdd={async d => { await cSp(d); reSp(); }}
-        onEdit={async d => { await uSp(d); reSp(); }}
-        onDelete={async d => { await dSp(d); reSp(); }}
-      />
+      {/* Départements/Spécialités — sans objet au primaire (voir labels.showDepartements),
+          et le libellé du secondaire est "Séries"/"Options", pas "Départements"/"Spécialités". */}
+      {labels.showDepartements && (
+        <>
+          <RefSection
+            title={labels.isSecondaire ? (lang === 'en' ? 'Series' : 'Séries') : (lang === 'en' ? 'Departments' : 'Départements')}
+            icon="fas fa-sitemap" color="#26c6da"
+            items={deps || []} FormComponent={DepartementForm}
+            columns={[
+              { label: t.common.colCode,  render: r => <strong style={{ color: '#26c6da' }}>{r.code_dep}</strong> },
+              { label: t.common.colLabel, render: r => r.lib_dep },
+              { label: t.common.colObs,   render: r => <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>{r.obs_dep || '—'}</span> },
+            ]}
+            onAdd={async d => { await cD(d); reD(); }}
+            onEdit={async d => { await uD(d); reD(); }}
+            onDelete={async d => { await dD(d); reD(); }}
+          />
+          <RefSection
+            title={labels.isSecondaire ? (lang === 'en' ? 'Options' : 'Options') : (lang === 'en' ? 'Specialities' : 'Spécialités')}
+            icon="fas fa-graduation-cap" color="#66bb6a"
+            items={specs || []} FormComponent={SpecialiteForm} formProps={{ departements: deps || [] }}
+            columns={[
+              { label: t.common.colCode,  render: r => <strong style={{ color: '#66bb6a' }}>{r.code_sp}</strong> },
+              { label: t.common.colLabel, render: r => r.lib_sp },
+              { label: t.common.colDept,  render: r => r.lib_dep || r.code_dep || '—' },
+              { label: t.common.colObs,   render: r => <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>{r.obs_sp || '—'}</span> },
+            ]}
+            onAdd={async d => { await cSp(d); reSp(); }}
+            onEdit={async d => { await uSp(d); reSp(); }}
+            onDelete={async d => { await dSp(d); reSp(); }}
+          />
+        </>
+      )}
     </div>
   );
 }
@@ -721,7 +890,9 @@ function InfraTab() {
 }
 
 function EvalTab() {
-  const { t } = useApp();
+  const { t, lang } = useApp();
+  const { typeEtab, systeme } = useEtablissement();
+  const labels = etabLabels(typeEtab, systeme, lang);
   const { data: typeEvals, reload: reTE } = useApi(useCallback(() => typeEvalService.list({ page_size: 100 }), []));
   const { data: jours,     reload: reJ }  = useApi(useCallback(() => jourService.list({ page_size: 20 }), []));
   const { mutate: cTE } = useMutation(useCallback(d => typeEvalService.create(d), []));
@@ -735,8 +906,15 @@ function EvalTab() {
     <div>
       <RefSection title={t.pages.parametrage.sections.typeEvals} icon="fas fa-clipboard-list" color="#ef5350"
         items={typeEvals || []} FormComponent={TypeEvalForm}
+        formProps={{ defaultTypeEtab: typeEtab, typeEvals: typeEvals || [] }}
         columns={[
           { label: t.common.colLabel, render: r => <strong>{r.lib_type_eval}</strong> },
+          { label: "Type",            render: r => r.type_etab
+              ? <span className="sms-badge badge-info" style={{ fontSize: 10 }}>{r.type_etab}</span>
+              : <span style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>Partagé</span> },
+          { label: "Pondération",     render: r => r.ponderation != null
+              ? <span className="sms-badge badge-success" style={{ fontSize: 10 }}>{r.ponderation}%</span>
+              : <span style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>Non pondéré</span> },
           { label: t.common.colObs,   render: r => <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>{r.obs_type_eval || '—'}</span> },
         ]}
         onAdd={async d => { await cTE(d); reTE(); }}
@@ -759,7 +937,9 @@ function EvalTab() {
 }
 
 function FinancierTab() {
-  const { t } = useApp();
+  const { t, lang } = useApp();
+  const { typeEtab, systeme } = useEtablissement();
+  const labels = etabLabels(typeEtab, systeme, lang);
   const { data: pensions, reload: rePen } = useApi(useCallback(() => pensionService.list({ page_size: 100 }), []));
   const { data: tranches, reload: reTr }  = useApi(useCallback(() => trancheService.list({ page_size: 200 }), []));
   const { data: frais,    reload: reFr }  = useApi(useCallback(() => fraisService.list({ page_size: 200 }), []));
@@ -778,11 +958,16 @@ function FinancierTab() {
     <div>
       <RefSection title={t.pages.parametrage.sections.pensions} icon="fas fa-hand-holding-usd" color="#4caf50"
         items={pensions || []} FormComponent={PensionForm}
+        formProps={{ defaultTypeEtab: typeEtab }}
         columns={[
-          { label: t.common.colLabel,                       render: r => <strong>{r.lib_pension || `Pension ${r.code_pension}`}</strong> },
-          { label: t.pages.parametrage.cols.scolarite,      render: r => <span style={{ color: 'var(--green)', fontWeight: 700 }}>{fmt(r.mt_pension)} FCFA</span> },
-          { label: t.pages.parametrage.cols.inscription,    render: r => <span style={{ color: '#ffa726', fontWeight: 700 }}>{fmt(r.mt_inscription)} FCFA</span> },
-          { label: t.pages.parametrage.cols.tranches,       render: r => r.nb_tranche ?? '—' },
+          { label: t.common.colLabel,                    render: r => <strong>{r.lib_pension || `Pension ${r.code_pension}`}</strong> },
+          { label: t.pages.parametrage.cols.scolarite,   render: r => <span style={{ color: 'var(--green)', fontWeight: 700 }}>{fmt(r.mt_pension)} FCFA</span> },
+          { label: t.pages.parametrage.cols.inscription, render: r => <span style={{ color: '#ffa726', fontWeight: 700 }}>{fmt(r.mt_inscription)} FCFA</span> },
+          { label: t.pages.parametrage.cols.tranches,    render: r => r.nb_tranche ?? '—' },
+          { label: "Type étab.", render: r => r.type_etab
+            ? <span style={{ fontSize:10, fontWeight:700, padding:'2px 6px', borderRadius:8, background:'rgba(76,175,80,.15)', color:'var(--green)', border:'1px solid rgba(76,175,80,.3)' }}>{r.type_etab}</span>
+            : <span style={{ fontSize:10, color:'var(--text-muted)' }}>Partagé</span>
+          },
         ]}
         onAdd={async d => { await cPen(d); rePen(); }}
         onEdit={async d => { await uPen(d); rePen(); }}
@@ -827,7 +1012,7 @@ const TAB_ICONS = {
   financier:  'fas fa-coins',
 };
 const TAB_COLORS = {
-  calendrier: '#4caf50',
+  calendrier: '#5aa35a',
   structure:  '#ab47bc',
   infra:      '#5c6bc0',
   evaluation: '#ef5350',
@@ -864,12 +1049,13 @@ export default function Parametrage() {
         {TABS.map(tab => (
           <button key={tab.key} onClick={() => setActiveTab(tab.key)} style={{
             flex: 1, minWidth: 120, padding: '10px 14px',
-            border: 'none', borderRadius: 8, cursor: 'pointer',
+            border: `1px solid ${activeTab === tab.key ? 'transparent' : 'var(--border)'}`,
+            borderRadius: 8, cursor: 'pointer',
             fontSize: 12, fontWeight: 600,
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
             transition: 'var(--transition)',
-            background: activeTab === tab.key ? tab.color : 'transparent',
-            color:      activeTab === tab.key ? '#fff' : 'var(--text-muted)',
+            background: activeTab === tab.key ? tab.color : 'var(--bg-dark)',
+            color:      activeTab === tab.key ? '#fff' : 'var(--text-secondary)',
             boxShadow:  activeTab === tab.key ? `0 2px 8px ${tab.color}40` : 'none',
           }}>
             <i className={tab.icon} style={{ fontSize: 13 }} />
@@ -886,3 +1072,4 @@ export default function Parametrage() {
     </div>
   );
 }
+

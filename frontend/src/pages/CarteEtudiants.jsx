@@ -1,18 +1,23 @@
 /**
- * pages/CarteEtudiants.jsx — Cartes étudiants avec QR code
+ * pages/CarteEtudiants.jsx — Cartes scolaires avec QR code
  */
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import api from '../services/api';
 import { CrudTable, FormField } from '../components/CrudTable';
 import { useApp } from '../context/AppContext';
 import { useApi, useMutation } from '../hooks/useApi';
 import { carteEtudiantService } from '../services/endpoints';
 import { LoadingState, ErrorState } from '../components/ApiState';
+import { AvatarCircle } from '../utils/avatar';
+import { useEtablissement } from '../hooks/useEtablissement';
+import { etabLabels } from '../utils/etabLabels';
 
 const STATUT_COLORS = { ACTIVE:'badge-success', PERDUE:'badge-warning', EXPIREE:'badge-secondary', ANNULEE:'badge-danger' };
 
 function Form({ item, onClose, onSave }) {
-  const { t } = useApp();
+  const { t, lang } = useApp();
+  const { typeEtab, systeme } = useEtablissement();
+  const labels = etabLabels(typeEtab, systeme, lang);
   const [etudiants, setEts] = useState([]);
   const [loading, setLoad]  = useState(true);
   const [f, setF] = useState({
@@ -43,7 +48,7 @@ function Form({ item, onClose, onSave }) {
     <form onSubmit={e => { e.preventDefault(); onSave(f); }}>
       <div className="sms-form-row">
         <div className="sms-form-group">
-          <label className="sms-label">{t.fields.nomEtud} *</label>
+          <label className="sms-label">{labels.studentLabel} *</label>
           <select className="sms-input" name="mle_etudiant" value={f.mle_etudiant} onChange={ch} required>
             <option value="">{t.common.select}</option>
             {etudiants.map(e => <option key={e.mle_etudiant} value={e.mle_etudiant}>{e.nom} {e.prenom||''} ({e.mle_etudiant})</option>)}
@@ -53,7 +58,7 @@ function Form({ item, onClose, onSave }) {
       </div>
       <div className="sms-form-row">
         <FormField label={t.fields.numeroCarte} name="numero_carte"    value={f.numero_carte}    onChange={ch} placeholder="CARTE-2026-001" />
-        <FormField label={t.fields.expiration}  name="date_expiration" type="date" value={f.date_expiration} onChange={ch} />
+        <FormField label={t.fields.expiration}  name="date_expiration" type="date" value={f.date_expiration} onChange={ch} help="Format : JJ/MM/AAAA" />
         <div className="sms-form-group">
           <label className="sms-label">{t.fields.statut}</label>
           <select className="sms-input" name="statut" value={f.statut} onChange={ch}>
@@ -75,27 +80,51 @@ function Form({ item, onClose, onSave }) {
   );
 }
 
+const PAGE_SIZE = 25;
+
 export default function CarteEtudiants() {
-  const { t, toast } = useApp();
-  const { data, loading, error, reload } = useApi(() => carteEtudiantService.list({ page_size: 100 }));
+  const { t, toast, lang } = useApp();
+  const { typeEtab, systeme } = useEtablissement();
+  const labels = etabLabels(typeEtab, systeme, lang);
+  const [page,         setPage]   = useState(1);
+  const [serverSearch, setSearch] = useState('');
+
+  const { data, count, loading, error, reload } = useApi(
+    () => carteEtudiantService.list({
+      page_size: PAGE_SIZE, page,
+      ...(serverSearch ? { search: serverSearch } : {}),
+    }),
+    [page, serverSearch]
+  );
   const { mutate: create } = useMutation(useCallback(d => carteEtudiantService.create(d), []));
   const { mutate: update } = useMutation(useCallback(d => carteEtudiantService.update(d.code_carte, d), []));
   const { mutate: remove } = useMutation(useCallback(d => carteEtudiantService.delete(d.code_carte), []));
 
-  const COLS = [
-    { key:'etud',    label: t.fields.nomEtud, searchValue: r => r.nom_etudiant || r.mle_etudiant || '', render:r => <strong>{r.nom_etudiant || r.mle_etudiant}</strong> },
+  const COLS = useMemo(() => [
+    { key:'avatar', label:'', render: r => {
+        const nom = (r.nom_etudiant || r.mle_etudiant || '').split(' ');
+        return <AvatarCircle nom={nom[0]} prenom={nom[1]} photoUrl={r.photo_url || null} size={36} />;
+      }
+    },
+    { key:'etud',    label: labels.studentLabel, searchValue: r => r.nom_etudiant || r.mle_etudiant || '', render:r => <strong>{r.nom_etudiant || r.mle_etudiant}</strong> },
     { accessor:'numero_carte',    label: t.fields.numeroCarte },
     { accessor:'code_annee',      label: t.fields.annee },
     { accessor:'date_expiration', label: t.fields.expiration },
     { key:'statut',  label: t.fields.statut, searchValue: r => r.statut || '', render:r => <span className={`sms-badge ${STATUT_COLORS[r.statut]||'badge-secondary'}`}>{r.statut}</span> },
     { key:'qr',      label: t.fields.qrCode, render:r => <code style={{ fontSize:10, color:'var(--text-muted)', maxWidth:120, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', display:'block' }}>{r.qr_code_data?.slice(0,30)}...</code> },
-  ];
+  ], [t]);
 
-  if (loading) return <LoadingState />;
-  if (error)   return <ErrorState message={error} onRetry={reload} />;
+  if (error) return <ErrorState message={error} onRetry={reload} />;
   return (
     <CrudTable title={t.pages.cartes.title} subtitle={t.pages.cartes.subtitle} icon="fas fa-id-card"
       columns={COLS} data={data||[]} addLabel={t.pages.cartes.addLabel}
+      loading={loading}
+      totalCount={count}
+      serverSide
+      serverPage={page}
+      serverPages={Math.max(1, Math.ceil((count || 0) / PAGE_SIZE))}
+      onServerPage={setPage}
+      onServerSearch={setSearch}
       onAdd={async d => { try { await create(d); toast.success(t.toast.saved); reload(); } catch(e){ toast.error(e.message); } }}
       onEdit={async d => { try { await update(d); toast.success(t.toast.updated); reload(); } catch(e){ toast.error(e.message); } }}
       onDelete={async d => { try { await remove(d); toast.success(t.toast.deleted); reload(); } catch(e){ toast.error(e.message); } }}

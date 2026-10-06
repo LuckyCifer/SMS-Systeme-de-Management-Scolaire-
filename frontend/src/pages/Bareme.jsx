@@ -9,38 +9,47 @@ import { useApp } from '../context/AppContext';
 import { useApi, useMutation } from '../hooks/useApi';
 import { pensionService, trancheService, niveauService } from '../services/endpoints';
 import { LoadingState, ErrorState } from '../components/ApiState';
+import { useEtablissement } from '../hooks/useEtablissement';
+import { etabLabels } from '../utils/etabLabels';
 
 // ── Formulaire Pension ────────────────────────────────────────────────────────
-function PensionForm({ item, onClose, onSave }) {
+const TYPE_ETAB_OPTS = [
+  { value: '',           label: '— Partagé (tous types) —' },
+  { value: 'PRIMAIRE',   label: 'Primaire' },
+  { value: 'SECONDAIRE', label: 'Secondaire' },
+  { value: 'SUPERIEUR',  label: 'Supérieur' },
+];
+
+function PensionForm({ item, onClose, onSave, defaultTypeEtab }) {
   const { t } = useApp();
-  const isEdit = Boolean(item?.code_pension);
   const [f, setF] = useState({
-    code_pension:   item?.code_pension   ?? '',
     lib_pension:    item?.lib_pension    || '',
     mt_pension:     item?.mt_pension     ?? 0,
     mt_inscription: item?.mt_inscription ?? 0,
     nb_tranche:     item?.nb_tranche     ?? 3,
     obs_pension:    item?.obs_pension    || '',
+    type_etab:      item?.type_etab      || defaultTypeEtab || '',
   });
   const ch = e => setF(p => ({ ...p, [e.target.name]: e.target.value }));
   return (
     <form onSubmit={e => { e.preventDefault(); onSave(f); }}>
       <div className="sms-form-row">
-        <FormField label={`${t.pages.bareme.codeRegime} *`} name="code_pension" type="number"
-          value={f.code_pension} onChange={ch} required disabled={isEdit}
-          placeholder="Ex : 1, 2, 3…" />
         <FormField label={`${t.pages.bareme.libelleRegime} *`} name="lib_pension" value={f.lib_pension} onChange={ch}
-          required placeholder="Ex : Licence Informatique, Master IA…" />
+          required placeholder="Ex : Scolarité Terminale C…" />
       </div>
       <div className="sms-form-row">
         <FormField label={`${t.pages.bareme.scolariteAnn} *`} name="mt_pension" type="number"
-          value={f.mt_pension} onChange={ch} required />
+          value={f.mt_pension} onChange={ch} required placeholder="Ex : 850 000" />
         <FormField label={t.fields.inscriptionFrais} name="mt_inscription" type="number"
-          value={f.mt_inscription} onChange={ch} />
+          value={f.mt_inscription} onChange={ch} placeholder="Ex : 50 000" />
         <FormField label={t.pages.bareme.nbTranches} name="nb_tranche" type="number"
-          value={f.nb_tranche} onChange={ch} />
+          value={f.nb_tranche} onChange={ch} placeholder="Ex : 3" />
       </div>
-      <FormField label={t.fields.obs} name="obs_pension" type="textarea" value={f.obs_pension} onChange={ch} />
+      <div className="sms-form-row">
+        <FormField label={t.nav.typeEtab} name="type_etab" type="select"
+          value={f.type_etab} onChange={ch} options={TYPE_ETAB_OPTS} />
+        <FormField label={t.fields.obs} name="obs_pension" type="textarea" value={f.obs_pension} onChange={ch} />
+      </div>
       <div className="sms-modal-footer" style={{ padding: '14px 0 0', border: 'none' }}>
         <button type="button" className="sms-btn sms-btn-outline sms-btn-sm" onClick={onClose}>{t.common.cancel}</button>
         <button type="submit" className="sms-btn sms-btn-primary sms-btn-sm">
@@ -67,7 +76,7 @@ function TrancheForm({ item, pensionId, onClose, onSave }) {
         <FormField label={`${t.fields.libelle} *`} name="lib_tranche" value={f.lib_tranche} onChange={ch}
           required placeholder="Ex : Tranche 1, Acompte…" />
         <FormField label={`${t.fields.montant} *`} name="mt_tranche" type="number"
-          value={f.mt_tranche} onChange={ch} required />
+          value={f.mt_tranche} onChange={ch} required placeholder="Ex : 283 000" />
       </div>
       <FormField label={t.fields.obs} name="obs_tranche" value={f.obs_tranche} onChange={ch} />
       <div className="sms-modal-footer" style={{ padding: '14px 0 0', border: 'none' }}>
@@ -231,7 +240,9 @@ function NiveauxPanel({ selectedPension, selData, onNiveauxChange }) {
 
 // ── Page principale ───────────────────────────────────────────────────────────
 export default function Bareme() {
-  const { t, toast } = useApp();
+  const { t, toast, lang } = useApp();
+  const { typeEtab, systeme } = useEtablissement();
+  const labels = etabLabels(typeEtab, systeme, lang);
   const [selectedPension, setSelectedPension] = useState(null);
   const [linkedNiveaux, setLinkedNiveaux]     = useState([]);
 
@@ -325,7 +336,7 @@ export default function Bareme() {
               try { await removeP(d); toast.success(t.toast.deleted); reloadP(); if (selectedPension === d.code_pension) setSelectedPension(null); }
               catch (e) { toast.error(e.message); }
             }}
-            renderForm={p => <PensionForm {...p} />}
+            renderForm={p => <PensionForm {...p} defaultTypeEtab={typeEtab} />}
             onRowClick={r => setSelectedPension(r.code_pension === selectedPension ? null : r.code_pension)}
             rowStyle={r => r.code_pension === selectedPension
               ? { background: 'var(--green-dark)22', borderLeft: '3px solid var(--green)' }

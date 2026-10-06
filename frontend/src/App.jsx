@@ -2,6 +2,7 @@ import { Component } from 'react';
 import { BrowserRouter } from 'react-router-dom';
 import { AppProvider } from './context/AppContext';
 import { NotificationProvider } from './context/NotificationContext';
+import { PdfPreviewProvider } from './context/PdfPreviewContext';
 import AppRoutes from './routes/AppRoutes';
 import './App.css';
 
@@ -35,10 +36,12 @@ class ErrorBoundary extends Component {
 export default function App() {
   return (
     <ErrorBoundary>
-      <BrowserRouter>
+      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <AppProvider>
           <NotificationProvider>
-            <AppRoutes />
+            <PdfPreviewProvider>
+              <AppRoutes />
+            </PdfPreviewProvider>
           </NotificationProvider>
         </AppProvider>
       </BrowserRouter>

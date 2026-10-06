@@ -7,6 +7,7 @@ from .models import (
     TypeEtab, Batiment, Salle, Jour, Langue, Module, Pension, Mention,
     TypeEvaluation, Rapport, Annee, Etablissement, Departement, Specialite,
     Cycle, Niveau, Classe, MentionClasse, Etudiant, Enseignant, Utilisateur,
+    Personnel,
     Tranche, Frais, Inscription, FraisInscription, Paiement, Moratoire,
     Matiere, Qualification, Cours, UniteEnseignement, Periode, Evaluation,
     Planning, RapportCours
@@ -91,10 +92,6 @@ class ClasseAdmin(admin.ModelAdmin):
     list_display  = ['code_classe', 'lib_classe', 'code_dep', 'code_niveau', 'eff_max']
     list_filter   = ['code_dep', 'code_niveau']
     search_fields = ['code_classe', 'lib_classe']
-@admin.register(MentionClasse)
-class MentionClasseAdmin(admin.ModelAdmin):
-    list_display = ['code_classe', 'code_mention', 'obs_mention']
-    list_filter  = ['code_classe']
 # ─────────────────────────────────────────
 # Personnes
 # ─────────────────────────────────────────
@@ -116,6 +113,16 @@ class UtilisateurAdmin(admin.ModelAdmin):
     list_display = ['login']
     search_fields = ['login']
     # passwd non affiché pour la sécurité
+# ─────────────────────────────────────────
+# Personnel administratif et de soutien
+# ─────────────────────────────────────────
+@admin.register(Personnel)
+class PersonnelAdmin(admin.ModelAdmin):
+    list_display   = ['mle_personnel', 'nom', 'prenom', 'poste', 'categorie',
+                      'type_contrat', 'actif', 'etablissement']
+    list_filter    = ['poste', 'categorie', 'type_contrat', 'actif', 'etablissement']
+    search_fields  = ['nom', 'prenom', 'mle_personnel', 'matricule_fonct']
+    ordering       = ['categorie', 'poste', 'nom']
 # ─────────────────────────────────────────
 # Scolarité & Paiements
 # ─────────────────────────────────────────
