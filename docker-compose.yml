@@ -1,0 +1,58 @@
+services:
+  db:
+    image: mysql:8.0
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_DATABASE: sms
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-smsroot}
+    ports:
+      # 3307 côté hôte : évite le conflit avec MySQL de XAMPP qui occupe déjà 3306
+      - "3307:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-smsroot}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DEBUG: "True"
+      SECRET_KEY: ${SECRET_KEY:-django-insecure-docker-dev-only-change-me}
+      DB_NAME: sms
+      DB_USER: root
+      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-smsroot}
+      DB_HOST: db
+      DB_PORT: 3306
+      ALLOWED_HOSTS: "*"
+      # Peuple la base avec les 3 établissements de démo (comptes "Demo2026!")
+      # au premier démarrage. Idempotent : sans danger de le relancer.
+      SEED_DEMO: ${SEED_DEMO:-true}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    command: python manage.py runserver 0.0.0.0:8000
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+    environment:
+      # Le navigateur tourne sur l'hôte, pas dans le réseau Docker : il doit
+      # viser le port backend publié sur localhost, pas le nom de service "backend".
+      VITE_API_URL: http://localhost:8000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: npm run dev -- --host 0.0.0.0
+
+volumes:
+  db_data:

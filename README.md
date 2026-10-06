@@ -113,8 +113,8 @@ SMS covers the complete lifecycle of a school, from enrolment to graduation.
 ### 1 — Clone the repository
 
 ```bash
-git clone https://github.com/LuckyCifer/sms-django-react.git
-cd sms-django-react
+git clone https://github.com/LuckyCifer/SMS-Systeme-de-Management-Scolaire-.git
+cd SMS-Systeme-de-Management-Scolaire-
 ```
 
 ### 2 — Database setup
@@ -184,7 +184,7 @@ npm run dev
 ## 📁 Project Structure
 
 ```
-sms-django-react/
+SMS-Systeme-de-Management-Scolaire-/
 ├── backend/                    # Django application
 │   ├── api/                    # Main app
 │   │   ├── migrations/         # Database migrations
