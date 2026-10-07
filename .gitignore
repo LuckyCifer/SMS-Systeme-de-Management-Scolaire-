@@ -10,6 +10,8 @@
 *.pem
 *.key
 secrets.json
+# Dumps SQL importés par Docker (données réelles des établissements)
+docker/mysql-init/*.sql
 
 # ── Python / Django ───────────────────────────────────
 __pycache__/

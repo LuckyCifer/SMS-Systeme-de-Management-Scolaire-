@@ -101,6 +101,8 @@ SMS covers the complete lifecycle of a school, from enrolment to graduation.
 
 ## 🚀 Getting Started
 
+> 🐳 **With Docker** (no Python/Node/MySQL install needed): see [DOCKER.md](DOCKER.md).
+
 ### Prerequisites
 
 | Tool | Version |

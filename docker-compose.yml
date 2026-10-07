@@ -10,11 +10,17 @@ services:
       - "3307:3306"
     volumes:
       - db_data:/var/lib/mysql
+      # Les fichiers .sql de ce dossier sont importés automatiquement au PREMIER
+      # démarrage (volume db_data vide). Y placer le dump de la base XAMPP pour
+      # retrouver toutes les données ; ignoré par git (données personnelles).
+      - ./docker/mysql-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-smsroot}"]
       interval: 5s
       timeout: 5s
       retries: 20
+      # Délai de grâce pendant l'import initial du dump (serveur temporaire sans réseau)
+      start_period: 300s
 
   backend:
     build: ./backend
@@ -30,9 +36,9 @@ services:
       DB_HOST: db
       DB_PORT: 3306
       ALLOWED_HOSTS: "*"
-      # Peuple la base avec les 3 établissements de démo (comptes "Demo2026!")
-      # au premier démarrage. Idempotent : sans danger de le relancer.
-      SEED_DEMO: ${SEED_DEMO:-true}
+      # Mettre à "true" pour ajouter les 3 établissements de démo (seed_demo).
+      # Désactivé par défaut : la base est importée depuis docker/mysql-init/.
+      SEED_DEMO: ${SEED_DEMO:-false}
     ports:
       - "8000:8000"
     volumes:
@@ -47,12 +53,16 @@ services:
       # Le navigateur tourne sur l'hôte, pas dans le réseau Docker : il doit
       # viser le port backend publié sur localhost, pas le nom de service "backend".
       VITE_API_URL: http://localhost:8000
+      # Cache des dépendances pré-compilées par Vite, conservé entre les recréations
+      SMS_VITE_CACHE_DIR: /vite-cache
     ports:
       - "5173:5173"
     volumes:
       - ./frontend:/app
       - /app/node_modules
+      - vite_cache:/vite-cache
     command: npm run dev -- --host 0.0.0.0
 
 volumes:
   db_data:
+  vite_cache:
