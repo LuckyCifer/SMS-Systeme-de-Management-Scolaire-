@@ -77,38 +77,6 @@ CREATE TABLE `audit_log` (
   `date_action` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT 'Date et heure exactes'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Journal d''audit — toutes les actions du système';
 
---
--- Déchargement des données de la table `audit_log`
---
-
-INSERT INTO `audit_log` (`id`, `utilisateur`, `action`, `modele`, `objet_id`, `detail`, `ip_address`, `date_action`) VALUES
-(1, 'Yemeya Luc', 'LOGIN_FAILED', 'Utilisateur', 'Yemeya Luc', 'Utilisateur inexistant', '127.0.0.1', '2026-04-08 14:39:35.964352'),
-(2, 'Lucky', 'LOGIN_FAILED', 'Utilisateur', 'Lucky', 'Mot de passe incorrect', '127.0.0.1', '2026-04-08 14:51:09.284439'),
-(3, 'Lucky', 'LOGIN_FAILED', 'Utilisateur', 'Lucky', 'Mot de passe incorrect', '127.0.0.1', '2026-04-08 14:52:30.174087'),
-(4, 'Lucky', 'LOGIN_FAILED', 'Utilisateur', 'Lucky', 'Mot de passe incorrect', '127.0.0.1', '2026-04-08 14:56:10.366820'),
-(5, 'Lucky', 'LOGIN_SUCCESS', 'Utilisateur', 'Lucky', 'Connexion depuis 127.0.0.1', '127.0.0.1', '2026-04-10 13:40:30.610864'),
-(6, 'Lucky', 'LOGIN_SUCCESS', 'Utilisateur', 'Lucky', 'Connexion depuis 127.0.0.1', '127.0.0.1', '2026-04-10 13:42:35.955551'),
-(7, 'Lucky', 'UPDATE', 'Classe', 'LRAS1', '', '127.0.0.1', '2026-04-10 13:44:26.401965'),
-(8, 'Lucky', 'UPDATE', 'Classe', 'LRAS1', '', '127.0.0.1', '2026-04-10 13:44:39.757290'),
-(9, 'Lucky', 'LOGIN_SUCCESS', 'Utilisateur', 'Lucky', 'Connexion depuis 127.0.0.1', '127.0.0.1', '2026-04-11 17:42:11.691363'),
-(10, 'Lucky', 'CREATE', 'Etudiant', 'ETU001', '', '127.0.0.1', '2026-04-11 17:56:22.493237'),
-(11, 'Lucky', 'CREATE', 'Etudiant', 'ETU002', '', '127.0.0.1', '2026-04-11 18:14:04.156874'),
-(12, 'Lucky', 'LOGIN_SUCCESS', 'Utilisateur', 'Lucky', 'Connexion depuis 127.0.0.1', '127.0.0.1', '2026-04-11 18:47:23.660282'),
-(13, 'Lucky', 'CREATE', 'CarteEtudiant', '1', '', '127.0.0.1', '2026-04-11 19:01:28.826780'),
-(14, 'Lucky', 'CREATE', 'CarteEtudiant', '2', '', '127.0.0.1', '2026-04-11 19:02:20.765412'),
-(15, 'Lucky', 'UPDATE', 'Classe', 'LGEE1', '', '127.0.0.1', '2026-04-12 17:43:47.015995'),
-(16, 'Lucky', 'UPDATE', 'Classe', 'LGEE1', '', '127.0.0.1', '2026-04-12 17:44:04.990530'),
-(17, 'Lucky', 'UPDATE', 'Classe', 'LIA1', '', '127.0.0.1', '2026-04-12 17:44:30.047750'),
-(18, 'Lucky', 'UPDATE', 'Classe', 'LRAS1', '', '127.0.0.1', '2026-04-12 17:44:58.991158'),
-(19, 'Lucky', 'CREATE', 'Inscription', '1', '', '127.0.0.1', '2026-04-12 18:54:16.986884'),
-(20, 'Lucky', 'CREATE', 'Inscription', '2', '', '127.0.0.1', '2026-04-12 18:59:44.229274'),
-(21, 'Lucky', 'CREATE', 'Paiement', '1', '', '127.0.0.1', '2026-04-12 19:01:45.970061'),
-(22, 'Lucky', 'CREATE', 'Paiement', '2', '', '127.0.0.1', '2026-04-12 19:02:29.638228'),
-(23, 'Lucky', 'CREATE', 'Etudiant', 'ETU003', '', '127.0.0.1', '2026-04-12 19:08:49.492193'),
-(24, 'Lucky', 'CREATE', 'Etudiant', 'ETU004', '', '127.0.0.1', '2026-04-12 19:17:37.592917'),
-(25, 'Lucky', 'CREATE', 'Etudiant', 'ETU005', '', '127.0.0.1', '2026-04-12 19:22:56.235188'),
-(26, 'Lucky', 'LOGIN_SUCCESS', 'Utilisateur', 'Lucky', 'Connexion depuis 127.0.0.1', '127.0.0.1', '2026-04-12 19:24:08.939531'),
-(27, 'Lucky', 'LOGIN_SUCCESS', 'Utilisateur', 'Lucky', 'Connexion depuis 127.0.0.1', '127.0.0.1', '2026-04-14 12:35:35.730657');
 
 -- --------------------------------------------------------
 
@@ -412,12 +380,6 @@ CREATE TABLE `auth_user` (
   `date_joined` datetime(6) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
---
--- Déchargement des données de la table `auth_user`
---
-
-INSERT INTO `auth_user` (`id`, `password`, `last_login`, `is_superuser`, `username`, `first_name`, `last_name`, `email`, `is_staff`, `is_active`, `date_joined`) VALUES
-(1, 'pbkdf2_sha256$1000000$XJLc67i6b6PfBvkFQd814r$cJOzVuQggW2IArf3IVDT1reHvGDIxrZSDYUTSupQ4yc=', NULL, 0, 'Lucky', 'Luc', 'Yemeya', 'lucyemeya1@gmail.com', 1, 1, '2026-04-06 21:26:36.116592');
 
 -- --------------------------------------------------------
 
@@ -1572,12 +1534,6 @@ CREATE TABLE `utilisateur` (
   `passwd` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Mot de passe hashé (PBKDF2 Django)'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
---
--- Déchargement des données de la table `utilisateur`
---
-
-INSERT INTO `utilisateur` (`login`, `nom_user`, `role`, `passwd`) VALUES
-('Lucky', 'Yemeya Luc', 'ADMIN', 'Lucky54999!');
 
 -- --------------------------------------------------------
 
