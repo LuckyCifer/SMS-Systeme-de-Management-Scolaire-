@@ -8,6 +8,10 @@ export default defineConfig({
   cacheDir: process.env.SMS_VITE_CACHE_DIR || 'node_modules/.vite',
   server: {
     port: 5173,
+    // Docker sous Windows : les modifications de fichiers faites sur l'hôte ne génèrent
+    // pas d'événements dans le conteneur — sans sondage, Vite continue de servir
+    // l'ancienne version des fichiers modifiés (voir docker-compose.yml).
+    watch: process.env.SMS_VITE_POLLING === 'true' ? { usePolling: true, interval: 300 } : undefined,
     // Transforme toutes les pages dès le démarrage, avant la première visite :
     // les pages sont chargées à la demande (lazy) et sinon analysées seulement
     // au premier clic, pendant que le navigateur exécute déjà l'application.

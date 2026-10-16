@@ -6,8 +6,8 @@ services:
       MYSQL_DATABASE: sms
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-smsroot}
     ports:
-      # 3307 côté hôte : évite le conflit avec MySQL de XAMPP qui occupe déjà 3306
-      - "3307:3306"
+      # 3309 côté hôte : 3306 est pris par le MySQL de XAMPP, 3307 par SIRH et 3308 par PharmaGest
+      - "3309:3306"
     volumes:
       - db_data:/var/lib/mysql
       # Les fichiers .sql de ce dossier sont importés automatiquement au PREMIER
@@ -55,6 +55,8 @@ services:
       VITE_API_URL: http://localhost:8000
       # Cache des dépendances pré-compilées par Vite, conservé entre les recréations
       SMS_VITE_CACHE_DIR: /vite-cache
+      # Détection des fichiers modifiés sur l'hôte (Windows ne la transmet pas au conteneur)
+      SMS_VITE_POLLING: "true"
     ports:
       - "5173:5173"
     volumes:

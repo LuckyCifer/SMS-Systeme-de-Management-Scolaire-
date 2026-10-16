@@ -9,7 +9,7 @@ Cette notice permet de faire tourner l'application complète (base de données, 
 - **Docker Desktop** installé et démarré : <https://www.docker.com/products/docker-desktop/>
   (en bas à gauche de Docker Desktop, il doit être écrit *Engine running*).
 - Environ **5 Go** d'espace disque libre.
-- Les ports **5173**, **8000** et **3307** libres sur la machine.
+- Les ports **5173**, **8000** et **3309** libres sur la machine.
 - **Le fichier de la base de données** `01-sms.sql`, transmis à part par Luc (il n'est pas sur GitHub car il contient des données personnelles).
 - **Un identifiant et un mot de passe** pour se connecter à l'application, également transmis par Luc.
 
@@ -56,7 +56,7 @@ Cette notice permet de faire tourner l'application complète (base de données, 
 |---|---|
 | **Application web** | <http://localhost:5173> |
 | API (backend) | <http://localhost:8000> |
-| Base MySQL (outil externe : DBeaver, MySQL Workbench…) | hôte `127.0.0.1`, port `3307`, utilisateur `root`, mot de passe `smsroot` |
+| Base MySQL (outil externe : DBeaver, MySQL Workbench…) | hôte `127.0.0.1`, port `3309`, utilisateur `root`, mot de passe `smsroot` |
 
 ---
 
@@ -94,7 +94,7 @@ Les données saisies pendant les tests sont **conservées** entre les arrêts et
 | Symptôme | Cause probable | Solution |
 |---|---|---|
 | `failed to connect to the docker API` | Docker Desktop n'est pas démarré | Lancer Docker Desktop et attendre *Engine running* |
-| `port is already allocated` / `address already in use` | Un autre logiciel utilise le port 5173, 8000 ou 3307 | Fermer ce logiciel (autre serveur de dev, autre MySQL…) puis relancer |
+| `port is already allocated` / `address already in use` | Un autre logiciel utilise le port 5173, 8000 ou 3309 | Fermer ce logiciel (autre serveur de dev, autre MySQL…) puis relancer |
 | `dependency failed to start: container …-db-1 is unhealthy` | L'import de la base a échoué | Lire l'erreur avec `docker compose logs db` et l'envoyer à Luc |
 | La page de connexion s'affiche mais le login échoue | La base est vide (fichier `01-sms.sql` absent au premier lancement) | Placer le fichier dans `docker/mysql-init/`, puis `docker compose down -v` et `docker compose up -d` |
 | « Une erreur inattendue s'est produite » | Fichiers périmés dans le cache du navigateur | L'application se recharge normalement toute seule ; sinon F5. Si l'erreur persiste : vider le cache du navigateur (Ctrl + Maj + Suppr → *Images et fichiers en cache*) |
