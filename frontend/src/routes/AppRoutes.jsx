@@ -42,6 +42,7 @@ const Coefficients    = lazy(() => import('../pages/Coefficients'));
 const Parametrage     = lazy(() => import('../pages/Parametrage'));
 const Parametres      = lazy(() => import('../pages/Parametres'));
 const Absences        = lazy(() => import('../pages/Absences'));
+const VieScolaire     = lazy(() => import('../pages/VieScolaire'));
 const Bulletins       = lazy(() => import('../pages/Bulletins'));
 const MonDossier      = lazy(() => import('../pages/MonDossier'));
 const ImportCsv       = lazy(() => import('../pages/ImportCsv'));
@@ -85,6 +86,7 @@ export default function AppRoutes() {
           <Route path="parametrage"    element={<RoleGuard page="users"><Parametrage /></RoleGuard>} />
           <Route path="parametres"     element={<RoleGuard page="users"><Parametres /></RoleGuard>} />
           <Route path="absences"       element={<RoleGuard page="absences"><Absences /></RoleGuard>} />
+          <Route path="vie-scolaire"   element={<RoleGuard page="vieScolaire"><VieScolaire /></RoleGuard>} />
           <Route path="bulletins"      element={<RoleGuard page="bulletins"><Bulletins /></RoleGuard>} />
           <Route path="mon-dossier"    element={<RoleGuard page="monDossier"><MonDossier /></RoleGuard>} />
           <Route path="import-csv"     element={<RoleGuard page="importCsv"><ImportCsv /></RoleGuard>} />

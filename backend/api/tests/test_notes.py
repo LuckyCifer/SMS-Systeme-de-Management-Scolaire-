@@ -435,3 +435,146 @@ class DeliberationSuperieurTest(NotesTestBase):
         self.note('E1', self.fr, 6)
         self.generer(session='RATTRAPAGE')
         self.assertEqual(Decision.objects.get(mle_etudiant='E1', session='RATTRAPAGE').resultat, 'REDOUBLE')
+
+
+class FicheNotesJustesTest(NotesTestBase):
+    """Barème converti sur 20, absent non justifié = 0, absent justifié = neutralisé."""
+    def setUp(self):
+        super().setUp()
+        from api.models import Enseignant, FicheNotes
+        ens = Enseignant.objects.create(mle_ens='ENS1', nom_ens='Ens', etablissement=self.etab)
+        self.fiche = FicheNotes.objects.create(
+            code_matiere=self.maths, code_classe=self.classe, mle_ens=ens, code_periode=self.t1,
+            code_annee=self.annee, code_type_eval=self.devoir, date_evaluation='2025-10-06',
+            bareme=10, etablissement=self.etab,
+        )
+        for mle in ('A', 'B', 'C'):
+            self.eleve(mle)
+            self.note(mle, self.fr, 12)
+
+    def detail(self, mle, **kwargs):
+        return self.client.post('/api/fiches-notes-detail/', {
+            'code_fiche': self.fiche.pk, 'mle_etudiant': mle, **kwargs}, format='json')
+
+    def test_import_convertit_et_distingue_les_absences(self):
+        self.assertEqual(self.detail('A', note=8).status_code, 201)
+        self.assertEqual(self.detail('B', absent=True).status_code, 201)
+        self.assertEqual(self.detail('C', absent=True, justifie=True).status_code, 201)
+        r = self.client.post(f'/api/fiches-notes/{self.fiche.pk}/importer/')
+        self.assertEqual(r.data['imported'], 3)
+        notes = {e.mle_etudiant_id: (e.note, e.dispense) for e in Evaluation.objects.filter(code_matiere=self.maths)}
+        self.assertEqual(float(notes['A'][0]), 16.0)            # 8/10 → 16/20
+        self.assertEqual((float(notes['B'][0]), notes['B'][1]), (0.0, False))
+        self.assertEqual(notes['C'], (None, True))
+
+        res = self.moyennes(code_periode=self.t1.pk)
+        self.assertEqual(res['A']['moyenne_generale'], 14.0)    # (16 + 12) / 2
+        self.assertEqual(res['B']['moyenne_generale'], 6.0)     # (0 + 12) / 2
+        self.assertEqual(res['C']['moyenne_generale'], 12.0)    # maths neutralisées
+        maths_c = next(m for m in res['C']['matieres'] if m['code_matiere'] == 'MATHS')
+        self.assertTrue(maths_c['dispense'])
+
+    def test_note_au_dela_du_bareme_refusee(self):
+        r = self.detail('A', note=12)
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('note', r.data)
+
+    def test_bareme_nul_refuse(self):
+        r = self.client.patch(f'/api/fiches-notes/{self.fiche.pk}/', {'bareme': 0}, format='json')
+        self.assertEqual(r.status_code, 400)
+
+
+class ClotureNotesTest(NotesTestBase):
+    """Après clôture d'une période pour une classe, plus aucune note ne bouge."""
+    def setUp(self):
+        super().setUp()
+        self.eval_a = self.note('A', self.maths, 12)
+
+    def cloturer(self, periode=None):
+        return self.client.post('/api/clotures-notes/', {
+            'code_classe': 'C1', 'code_periode': (periode or self.t1).pk}, format='json')
+
+    def corps(self, **kw):
+        return {'mle_etudiant': self.eleve('B').pk, 'code_matiere': 'MATHS', 'code_classe': 'C1',
+                'code_periode': self.t1.pk, 'code_type_eval': self.devoir.pk, 'note': 10, **kw}
+
+    def test_toute_ecriture_refusee_apres_cloture(self):
+        self.assertEqual(self.cloturer().status_code, 201)
+        self.assertEqual(self.client.post('/api/evaluations/', self.corps(), format='json').status_code, 403)
+        self.assertEqual(self.client.patch(f'/api/evaluations/{self.eval_a.pk}/', {'note': 18}, format='json').status_code, 403)
+        self.assertEqual(self.client.delete(f'/api/evaluations/{self.eval_a.pk}/').status_code, 403)
+        self.assertEqual(self.client.post('/api/evaluations/bulk-delete/', {'ids': [self.eval_a.pk]}, format='json').status_code, 403)
+        self.eval_a.refresh_from_db()
+        self.assertEqual(float(self.eval_a.note), 12.0)
+
+    def test_sequence_d_un_trimestre_clos_verrouillee(self):
+        seq = Periode.objects.create(lib_periode='Séquence 1', code_annee=self.annee, periode_parent=self.t1)
+        self.cloturer()
+        r = self.client.post('/api/evaluations/', self.corps(code_periode=seq.pk), format='json')
+        self.assertEqual(r.status_code, 403)
+
+    def test_reouverture_et_trace_des_modifications(self):
+        self.cloturer()
+        cloture = self.client.get('/api/clotures-notes/').data
+        cloture = (cloture['results'] if isinstance(cloture, dict) else cloture)[0]
+        self.assertEqual(cloture['cloturee_par'], 'admin_t')
+        self.assertEqual(self.client.delete(f"/api/clotures-notes/{cloture['id']}/").status_code, 204)
+        self.assertEqual(self.client.patch(f'/api/evaluations/{self.eval_a.pk}/', {'note': 15}, format='json').status_code, 200)
+        from api.models import AuditLog
+        self.assertTrue(AuditLog.objects.filter(modele='Evaluation', detail__contains='12.00 → 15').exists())
+
+    def test_enseignant_ne_peut_pas_cloturer(self):
+        Utilisateur.objects.create(login='ens_c', passwd=make_password('x'), role='ENSEIGNANT', etablissement=self.etab)
+        self.client.force_authenticate(user=User.objects.create_user(username='ens_c', password='x'))
+        self.assertEqual(self.cloturer().status_code, 403)
+
+
+class CircuitFicheTest(NotesTestBase):
+    """Brouillon → soumise (enseignant) → validée et reportée (censeur), saisie tout-ou-rien."""
+    def setUp(self):
+        super().setUp()
+        from api.models import Enseignant, FicheNotes, Inscription
+        self.prof = Utilisateur.objects.create(login='prof', passwd=make_password('x'), role='ENSEIGNANT', etablissement=self.etab)
+        ens = Enseignant.objects.create(mle_ens='ENS1', nom_ens='Ens', etablissement=self.etab, utilisateur=self.prof)
+        Cours.objects.create(code_matiere=self.maths, code_classe=self.classe, semestre='T1',
+                             code_annee=self.annee, mle_ens=ens, etablissement=self.etab)
+        for mle in ('A', 'B'):
+            Inscription.objects.create(code_classe=self.classe, mle_etudiant=self.eleve(mle),
+                                       code_annee=self.annee, etablissement=self.etab)
+        self.ens_client = APIClient()
+        self.ens_client.force_authenticate(user=User.objects.create_user(username='prof', password='x'))
+        # Création par l'enseignant, sans année : déduite de la période.
+        r = self.ens_client.post('/api/fiches-notes/', {
+            'code_matiere': 'MATHS', 'code_classe': 'C1', 'mle_ens': 'ENS1', 'code_periode': self.t1.pk,
+            'code_type_eval': self.devoir.pk, 'date_evaluation': '2025-10-06', 'bareme': 20,
+        }, format='json')
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data['code_annee'], '2025-2026')
+        self.fiche = FicheNotes.objects.get(pk=r.data['code_fiche'])
+
+    def saisir(self, client, notes):
+        return client.post(f'/api/fiches-notes/{self.fiche.pk}/saisir/', {'notes': notes}, format='json')
+
+    def test_saisie_tout_ou_rien(self):
+        r = self.saisir(self.ens_client, [{'mle_etudiant': 'A', 'note': 14}, {'mle_etudiant': 'B', 'note': 25}])
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(self.fiche.fichenotesdetail_set.count(), 0)
+        r = self.saisir(self.ens_client, [{'mle_etudiant': 'A', 'note': 14}, {'mle_etudiant': 'B', 'absent': True}])
+        self.assertEqual(r.data['enregistrees'], 2)
+
+    def test_circuit_complet(self):
+        self.saisir(self.ens_client, [{'mle_etudiant': 'A', 'note': 14}])
+        self.assertEqual(self.ens_client.post(f'/api/fiches-notes/{self.fiche.pk}/soumettre/').data['statut'], 'SOUMIS')
+        # Soumise : l'enseignant ne peut plus modifier ni valider lui-même.
+        self.assertEqual(self.saisir(self.ens_client, [{'mle_etudiant': 'A', 'note': 20}]).status_code, 403)
+        self.assertEqual(self.ens_client.post(f'/api/fiches-notes/{self.fiche.pk}/valider/').status_code, 403)
+        # Le censeur / l'administration valide : notes reportées aussitôt.
+        r = self.client.post(f'/api/fiches-notes/{self.fiche.pk}/valider/')
+        self.assertEqual((r.data['statut'], r.data['imported']), ('VALIDE', 1))
+        self.assertEqual(float(Evaluation.objects.get(mle_etudiant='A', code_matiere='MATHS').note), 14.0)
+        self.assertEqual(self.saisir(self.client, [{'mle_etudiant': 'A', 'note': 16}]).status_code, 403)
+        # Réouverture pour correction, puis revalidation.
+        self.assertEqual(self.client.post(f'/api/fiches-notes/{self.fiche.pk}/rouvrir/').data['statut'], 'BROUILLON')
+        self.saisir(self.ens_client, [{'mle_etudiant': 'A', 'note': 16}])
+        self.client.post(f'/api/fiches-notes/{self.fiche.pk}/valider/')
+        self.assertEqual(float(Evaluation.objects.get(mle_etudiant='A', code_matiere='MATHS').note), 16.0)

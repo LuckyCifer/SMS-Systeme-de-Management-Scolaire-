@@ -65,8 +65,11 @@ export default function Bulletins() {
     const choix = parsePeriodeChoice(selectedPeriode);
     if (!selectedClasse) { setInscriptions([]); setResultats([]); return; }
     setLoading(true);
+    // Année de la période choisie (ou « Année complète ») : seuls ses inscrits sont listés.
+    const codeAnnee = choix?.code_annee
+      || periodes.find(p => String(p.code_periode) === String(choix?.code_periode))?.code_annee;
     Promise.all([
-      api.get(`/api/inscriptions/?code_classe=${selectedClasse}&page_size=500`),
+      api.get('/api/inscriptions/', { params: { code_classe: selectedClasse, page_size: 500, ...(codeAnnee ? { code_annee: codeAnnee } : {}) } }),
       choix
         ? api.get('/api/evaluations/moyennes/', { params: { code_classe: selectedClasse, ...choix } })
         : Promise.resolve({ data: [] }),

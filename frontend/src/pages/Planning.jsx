@@ -8,25 +8,14 @@ import { useApi, useMutation } from '../hooks/useApi';
 import { FormField } from '../components/CrudTable';
 import { LoadingState, ErrorState } from '../components/ApiState';
 import {
-  planningService, coursService,
+  planningService, coursService, pauseService,
   jourService, salleService, classeService,
 } from '../services/endpoints';
+import { getUser } from '../utils/Auth';
 import SearchableSelect from '../components/SearchableSelect';
 import { useEtablissement } from '../hooks/useEtablissement';
 import { etabLabels } from '../utils/etabLabels';
 import { CoursForm } from './Cours';
-
-const PAUSE_STORAGE_KEY = 'sms_planning_pauses_v3';
-// Chaque entrée : { label, h_debut, h_fin, active }
-// pauses[0] = 1ère pause (toujours visible), pauses[1] = 2ème pause (désactivée par défaut)
-// overrides: { 'Lundi': [ pause0, pause1 ] }  — remplace toutes les pauses du jour
-const DEFAULT_PAUSE_CONFIG = {
-  pauses: [
-    { label: 'Pause',   h_debut: '10:00', h_fin: '10:30', active: true  },
-    { label: 'Pause 2', h_debut: '12:00', h_fin: '12:30', active: false },
-  ],
-  overrides: {},
-};
 
 const JOURS_FR        = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
 const JOUR_FR_TO_CODE = { Lundi: 'LUN', Mardi: 'MAR', Mercredi: 'MER', Jeudi: 'JEU', Vendredi: 'VEN', Samedi: 'SAM' };
@@ -325,9 +314,159 @@ function PlanningForm({ item, onClose, onSave, labels }) {
   );
 }
 
+// ── Pauses de l'école (récréations, pause déjeuner) ─────────────────────────
+// Enregistrées en base pour toute l'école : aucun cours ne peut les chevaucher (le serveur
+// refuse un créneau posé sur une pause, et une pause posée sur un cours).
+const ROLES_GESTION_PAUSES = ['SUPER_ADMIN', 'ADMIN', 'SCOLARITE', 'CENSEUR'];
+const PAUSE_VIDE = { id: null, libelle: '', code_jour: '', h_debut: '', h_fin: '' };
+const hm = h => (h || '').slice(0, 5);
+// Message du serveur (ex. « Ce créneau empiète sur la pause… ») plutôt que « status code 400 ».
+const messageErreur = e => {
+  const d = e?.response?.data;
+  if (typeof d === 'string') return d;
+  if (d?.detail) return d.detail;
+  const premier = d && Object.values(d)[0];
+  return (Array.isArray(premier) ? premier[0] : premier) || e.message;
+};
+
+function PausesModal({ pauses, onClose, onChanged }) {
+  const { t, toast } = useApp();
+  const tp = t.pages.planning;
+  const canEdit = ROLES_GESTION_PAUSES.includes(getUser()?.role);
+  const [form, setForm]     = useState(PAUSE_VIDE);
+  const [saving, setSaving] = useState(false);
+  const ch = e => setForm(f => ({ ...f, [e.target.name]: e.target.value }));
+
+  const jourLabel = code => (code ? (t.common.jours[code] || code) : tp.allDays);
+  const tri = [...pauses].sort((a, b) =>
+    (a.code_jour ? JOURS_FR.indexOf(a.lib_jour) + 1 : 0) - (b.code_jour ? JOURS_FR.indexOf(b.lib_jour) + 1 : 0)
+    || hm(a.h_debut).localeCompare(hm(b.h_debut)));
+
+  const save = async e => {
+    e.preventDefault();
+    setSaving(true);
+    const data = { libelle: form.libelle || 'Pause', code_jour: form.code_jour || null,
+                   h_debut: form.h_debut, h_fin: form.h_fin };
+    try {
+      if (form.id) await pauseService.update(form.id, data);
+      else         await pauseService.create(data);
+      toast.success(tp.pauseSaved);
+      setForm(PAUSE_VIDE);
+      onChanged();
+    } catch (err) { toast.error(messageErreur(err)); }
+    finally { setSaving(false); }
+  };
+  const del = async p => {
+    try { await pauseService.delete(p.id); toast.success(tp.pauseDeleted); onChanged(); }
+    catch (err) { toast.error(messageErreur(err)); }
+  };
+
+  return (
+    <div className="sms-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="sms-modal" style={{ maxWidth: 600 }}>
+        <div className="sms-modal-header">
+          <div className="sms-modal-title">
+            <i className="fas fa-coffee" style={{ marginRight: 8, color: '#ffa726' }}></i>
+            {tp.pauseTitle}
+          </div>
+          <button className="sms-btn-icon" onClick={onClose}><i className="fas fa-times"></i></button>
+        </div>
+
+        <div className="sms-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>{tp.pauseRule}</p>
+
+          {tri.length === 0 ? (
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>{tp.noPause}</div>
+          ) : (
+            <table className="sms-table">
+              <thead>
+                <tr>
+                  <th>{tp.dayField}</th><th>{tp.labelField}</th>
+                  <th>{tp.startField}</th><th>{tp.endField}</th>
+                  {canEdit && <th></th>}
+                </tr>
+              </thead>
+              <tbody>
+                {tri.map(p => (
+                  <tr key={p.id}>
+                    <td>{jourLabel(p.code_jour)}</td>
+                    <td>{p.libelle}</td>
+                    <td>{hm(p.h_debut)}</td>
+                    <td>{hm(p.h_fin)}</td>
+                    {canEdit && (
+                      <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}>
+                        <button className="sms-btn-icon" title={t.common.edit}
+                          onClick={() => setForm({ id: p.id, libelle: p.libelle, code_jour: p.code_jour || '',
+                                                   h_debut: hm(p.h_debut), h_fin: hm(p.h_fin) })}>
+                          <i className="fas fa-edit"></i>
+                        </button>
+                        <button className="sms-btn-icon" title={t.common.delete} onClick={() => del(p)}>
+                          <i className="fas fa-trash" style={{ color: 'var(--danger)' }}></i>
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {canEdit ? (
+            <form onSubmit={save} style={{
+              display: 'grid', gridTemplateColumns: '1.2fr 1.3fr 1fr 1fr', gap: 8, alignItems: 'end',
+              padding: 12, borderRadius: 8, background: 'var(--bg-hover)', border: '1px solid var(--border)',
+            }}>
+              <div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>{tp.dayField}</div>
+                <select className="sms-input" name="code_jour" value={form.code_jour} onChange={ch}>
+                  <option value="">{tp.allDays}</option>
+                  {JOURS_FR.map(j => (
+                    <option key={j} value={JOUR_FR_TO_CODE[j]}>{t.common.jours[JOUR_FR_TO_CODE[j]] || j}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>{tp.labelField}</div>
+                <input className="sms-input" name="libelle" value={form.libelle} onChange={ch}
+                  placeholder="Récréation" maxLength={30} />
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>{tp.startField}</div>
+                <input type="time" className="sms-input" name="h_debut" value={form.h_debut} onChange={ch} required />
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>{tp.endField}</div>
+                <input type="time" className="sms-input" name="h_fin" value={form.h_fin} onChange={ch} required />
+              </div>
+              <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                {form.id && (
+                  <button type="button" className="sms-btn sms-btn-outline sms-btn-sm" onClick={() => setForm(PAUSE_VIDE)}>
+                    {t.common.cancel}
+                  </button>
+                )}
+                <button type="submit" className="sms-btn sms-btn-primary sms-btn-sm" disabled={saving}>
+                  <i className={form.id ? 'fas fa-save' : 'fas fa-plus'}></i> {form.id ? tp.savePause : tp.addPause}
+                </button>
+              </div>
+            </form>
+          ) : (
+            <p style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic', margin: 0 }}>{tp.readOnlyPauses}</p>
+          )}
+        </div>
+
+        <div className="sms-modal-footer">
+          <button className="sms-btn sms-btn-primary sms-btn-sm" onClick={onClose}>
+            <i className="fas fa-check"></i> {tp.closeBtn}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Page principale ───────────────────────────────────────────────────────────
 export default function Planning() {
-  const { t, toast, lang } = useApp();
+  const { t, toast, lang, anneeActive } = useApp();
   const { typeEtab, systeme } = useEtablissement();
   const labels = etabLabels(typeEtab, systeme, lang);
   const [classeFilter,   setClasseFilter]   = useState('');  // stocke code_classe
@@ -337,56 +476,19 @@ export default function Planning() {
   const [editItem,  setEditItem]  = useState(null);
   const [delItem,   setDelItem]   = useState(null);
 
-  // ── Pauses ─────────────────────────────────────────────────────────────────
-  const [pauseConfig, setPauseConfig] = useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(PAUSE_STORAGE_KEY));
-      return saved?.pauses ? saved : DEFAULT_PAUSE_CONFIG;
-    } catch { return DEFAULT_PAUSE_CONFIG; }
-  });
+  // ── Pauses (en base, propres à l'école connectée) ─────────────────────────
+  const { data: pausesData, reload: reloadPauses } = useApi(
+    useCallback(() => pauseService.list(), [])
+  );
+  const pauses = pausesData || [];
   const [showPauseModal, setShowPauseModal] = useState(false);
-
-  // PRIMAIRE / SECONDAIRE supportent 2 pauses, SUPERIEUR 1 seule
-  const maxPauses = labels.isSuperieur ? 1 : 2;
-
-  useEffect(() => {
-    localStorage.setItem(PAUSE_STORAGE_KEY, JSON.stringify(pauseConfig));
-  }, [pauseConfig]);
-
-  const getPausesForDay = day => pauseConfig.overrides[day] || pauseConfig.pauses;
-
-  const updatePause = (idx, field, val) =>
-    setPauseConfig(c => {
-      const next = c.pauses.map((p, i) => i === idx ? { ...p, [field]: val } : p);
-      return { ...c, pauses: next };
-    });
-  const togglePauseActive = idx =>
-    setPauseConfig(c => {
-      const next = c.pauses.map((p, i) => i === idx ? { ...p, active: !p.active } : p);
-      return { ...c, pauses: next };
-    });
-
-  const enableDayOverride = day =>
-    setPauseConfig(c => ({
-      ...c, overrides: { ...c.overrides, [day]: c.pauses.map(p => ({ ...p })) },
-    }));
-  const updateDayPause = (day, idx, field, val) =>
-    setPauseConfig(c => {
-      const base = c.overrides[day] || c.pauses.map(p => ({ ...p }));
-      const next = base.map((p, i) => i === idx ? { ...p, [field]: val } : p);
-      return { ...c, overrides: { ...c.overrides, [day]: next } };
-    });
-  const toggleDayPauseActive = (day, idx) =>
-    setPauseConfig(c => {
-      const base = c.overrides[day] || c.pauses.map(p => ({ ...p }));
-      const next = base.map((p, i) => i === idx ? { ...p, active: !p.active } : p);
-      return { ...c, overrides: { ...c.overrides, [day]: next } };
-    });
-  const removeDayOverride = day =>
-    setPauseConfig(c => {
-      const { [day]: _, ...rest } = c.overrides;
-      return { ...c, overrides: rest };
-    });
+  const pausesSemaine = pauses.filter(p => !p.code_jour);
+  // Les pauses propres à un jour remplacent, ce jour-là, celles de toute la semaine.
+  const pausesPropres = day => pauses.filter(p => p.code_jour === JOUR_FR_TO_CODE[day]);
+  const getPausesForDay = day => {
+    const propres = pausesPropres(day);
+    return propres.length ? propres : pausesSemaine;
+  };
 
   const { data: planningData, loading, error, reload } = useApi(
     useCallback(() => {
@@ -394,9 +496,11 @@ export default function Planning() {
       const params = { page_size: 200 };
       if (classeFilter)   params['code_cours__code_classe'] = classeFilter;
       if (semestreFilter) params['code_cours__semestre']    = semestreFilter;
+      // Emploi du temps de l'année affichée dans le bandeau uniquement.
+      if (anneeActive?.code_annee) params['code_cours__code_annee'] = anneeActive.code_annee;
       return planningService.list(params);
-    }, [classeFilter, semestreFilter]),
-    [classeFilter, semestreFilter]
+    }, [classeFilter, semestreFilter, anneeActive?.code_annee]),
+    [classeFilter, semestreFilter, anneeActive?.code_annee]
   );
   const { data: classes } = useApi(
     useCallback(() => classeService.list({ page_size: 200 }), [])
@@ -531,9 +635,18 @@ export default function Planning() {
     return `Chevauchement détecté : "${c.lib_matiere || ''}" · ${c.lib_classe || ''} · ${c.h_debut?.slice(0,5)}–${c.h_fin?.slice(0,5)} (${pJour})`;
   };
 
+  const pauseChevauchee = formData => {
+    const { h_debut, h_fin } = formData;
+    if (!h_debut || !h_fin) return null;
+    const jourFr = JOURS_FR.find(j => JOUR_FR_TO_CODE[j] === formData.code_jour);
+    const candidates = formData.type_planning === 'HEBDO' && jourFr ? getPausesForDay(jourFr) : pauses;
+    const p = candidates.find(p => h_debut < hm(p.h_fin) && h_fin > hm(p.h_debut));
+    return p ? `Ce créneau empiète sur la pause « ${p.libelle} » (${hm(p.h_debut)} – ${hm(p.h_fin)}).` : null;
+  };
+
   const handleSave = async formData => {
     // Vérification anti-chevauchement avant envoi
-    const conflict = hasOverlap(formData);
+    const conflict = hasOverlap(formData) || pauseChevauchee(formData);
     if (conflict) {
       toast.error(conflict);
       return;
@@ -544,7 +657,7 @@ export default function Planning() {
       toast.success(editItem ? t.pages.planning.slotUpdated : t.pages.planning.slotAdded);
       reload();
       close();
-    } catch (e) { toast.error(e.message); }
+    } catch (e) { toast.error(messageErreur(e)); }
   };
 
   const handleExportPDF = () => {
@@ -871,7 +984,7 @@ export default function Planning() {
                     </div>
                   ))}
                   {/* Indicateurs de pauses actives */}
-                  {pauseConfig.pauses.filter(p => p.active).map((p, idx) => {
+                  {pausesSemaine.map((p, idx) => {
                     const startMin = timeToMin(p.h_debut);
                     if (startMin < GRID_START * 60 || startMin >= GRID_END * 60) return null;
                     const top = (startMin - GRID_START * 60) / 60 * HOUR_HEIGHT;
@@ -904,22 +1017,18 @@ export default function Planning() {
                       }} />
                     ))}
 
-                    {/* Bandes de pause propres à ce jour (1 ou 2 selon typeEtab) */}
+                    {/* Bandes de pause de ce jour */}
                     {(() => {
-                      const pauses   = getPausesForDay(j);
-                      const isCustom = Boolean(pauseConfig.overrides[j]);
-                      return pauses
-                        .slice(0, maxPauses)
-                        .filter(p => p.active)
-                        .map((pause, idx) => {
+                      const isCustom = pausesPropres(j).length > 0;
+                      return getPausesForDay(j).map((pause, idx) => {
                           const startMin = timeToMin(pause.h_debut);
                           const endMin   = timeToMin(pause.h_fin);
                           if (startMin < GRID_START * 60 || endMin > GRID_END * 60) return null;
                           const top    = (startMin - GRID_START * 60) / 60 * HOUR_HEIGHT;
                           const height = Math.max((endMin - startMin) / 60 * HOUR_HEIGHT, 8);
-                          const color  = idx === 1 ? '#ab47bc' : (isCustom ? '#ef5350' : '#ffa726');
+                          const color  = isCustom ? '#ef5350' : (idx % 2 ? '#ab47bc' : '#ffa726');
                           return (
-                            <div key={idx} style={{
+                            <div key={pause.id} style={{
                               position: 'absolute', top, left: 0, right: 0, height,
                               background: `repeating-linear-gradient(45deg,${color}18,${color}18 4px,${color}08 4px,${color}08 8px)`,
                               borderTop: `1px dashed ${color}50`,
@@ -928,7 +1037,7 @@ export default function Planning() {
                               display: 'flex', alignItems: 'center', justifyContent: 'center',
                             }}>
                               <span style={{ fontSize: 9, color, opacity: .75, fontStyle: 'italic', userSelect: 'none' }}>
-                                {pause.label}{isCustom ? ' ★' : ''}
+                                {height >= 12 ? pause.libelle : ''}{isCustom && height >= 12 ? ' ★' : ''}
                               </span>
                             </div>
                           );
@@ -1104,208 +1213,8 @@ export default function Planning() {
 
       {/* ── Modal pauses ── */}
       {showPauseModal && (
-        <div className="sms-overlay" onClick={e => e.target === e.currentTarget && setShowPauseModal(false)}>
-          <div className="sms-modal" style={{ maxWidth: 520 }}>
-            <div className="sms-modal-header">
-              <div className="sms-modal-title">
-                <i className="fas fa-coffee" style={{ marginRight: 8, color: '#ffa726' }}></i>
-                {t.pages.planning.pauseTitle}
-              </div>
-              <button className="sms-btn-icon" onClick={() => setShowPauseModal(false)}>
-                <i className="fas fa-times"></i>
-              </button>
-            </div>
-
-            <div className="sms-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-
-              {/* ── Pauses par défaut (1 ou 2 selon typeEtab) ── */}
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
-                  <i className="fas fa-globe" style={{ marginRight: 6, color: '#ffa726' }}></i>
-                  {t.pages.planning.defaultPause}
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {pauseConfig.pauses.slice(0, maxPauses).map((pause, idx) => {
-                    const colors = ['#ffa726', '#ab47bc'];
-                    const color  = colors[idx];
-                    return (
-                      <div key={idx} style={{
-                        display: 'grid', gridTemplateColumns: '28px 1fr 100px 100px',
-                        gap: 8, padding: '12px 14px',
-                        background: `${color}10`, borderRadius: 8,
-                        border: `1px solid ${color}40`,
-                        opacity: pause.active ? 1 : .5,
-                      }}>
-                        {/* Toggle actif */}
-                        <div style={{ display: 'flex', alignItems: 'center' }}>
-                          <button
-                            onClick={() => togglePauseActive(idx)}
-                            title={pause.active ? 'Désactiver' : 'Activer'}
-                            style={{
-                              width: 22, height: 22, border: `2px solid ${color}`,
-                              borderRadius: 4, background: pause.active ? color : 'transparent',
-                              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            }}
-                          >
-                            {pause.active && <i className="fas fa-check" style={{ fontSize: 10, color: '#fff' }}></i>}
-                          </button>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>
-                            {t.pages.planning.labelField} {idx + 1}
-                          </div>
-                          <input
-                            className="sms-input" style={{ height: 32, fontSize: 12 }}
-                            value={pause.label}
-                            onChange={e => updatePause(idx, 'label', e.target.value)}
-                            disabled={!pause.active}
-                            placeholder={`Pause ${idx + 1}`}
-                          />
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>{t.pages.planning.startField}</div>
-                          <input type="time" className="sms-input"
-                            style={{ height: 32, fontSize: 12, padding: '0 6px' }}
-                            value={pause.h_debut}
-                            onChange={e => updatePause(idx, 'h_debut', e.target.value)}
-                            disabled={!pause.active}
-                          />
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>{t.pages.planning.endField}</div>
-                          <input type="time" className="sms-input"
-                            style={{ height: 32, fontSize: 12, padding: '0 6px' }}
-                            value={pause.h_fin}
-                            onChange={e => updatePause(idx, 'h_fin', e.target.value)}
-                            disabled={!pause.active}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* ── Personnalisation par jour ── */}
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
-                  <i className="fas fa-sliders-h" style={{ marginRight: 6, color: '#ef5350' }}></i>
-                  {t.pages.planning.perDay} <span style={{ color: '#ef5350' }}>★</span>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {JOURS_FR.map(jour => {
-                    const hasOverride = Boolean(pauseConfig.overrides[jour]);
-                    const ovPauses    = pauseConfig.overrides[jour] || pauseConfig.pauses;
-                    const summary     = ovPauses
-                      .slice(0, maxPauses)
-                      .filter(p => p.active)
-                      .map(p => `${p.h_debut}–${p.h_fin}`)
-                      .join(', ');
-                    return (
-                      <div key={jour} style={{
-                        borderRadius: 8, border: `1px solid ${hasOverride ? '#ef535050' : 'var(--border)'}`,
-                        background: hasOverride ? '#ef535008' : 'var(--bg-hover)',
-                        overflow: 'hidden',
-                      }}>
-                        {/* En-tête jour */}
-                        <div style={{
-                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                          padding: '8px 14px',
-                        }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span style={{ fontSize: 12, fontWeight: 700, color: hasOverride ? '#ef5350' : 'var(--text-primary)', minWidth: 70 }}>
-                              {t.common.jours[JOUR_FR_TO_CODE[jour]] || jour}
-                            </span>
-                            <span style={{ fontSize: 10, color: hasOverride ? '#ef5350' : 'var(--text-muted)', fontStyle: 'italic' }}>
-                              {summary || '—'} {hasOverride ? t.pages.planning.customTag : `(${t.pages.planning.defaultTag})`}
-                            </span>
-                          </div>
-                          <button
-                            className="sms-btn sms-btn-sm sms-btn-outline"
-                            style={{
-                              fontSize: 10, padding: '3px 10px', height: 26,
-                              borderColor: hasOverride ? '#ef5350' : 'var(--border)',
-                              color: hasOverride ? '#ef5350' : 'var(--text-muted)',
-                            }}
-                            onClick={() => hasOverride ? removeDayOverride(jour) : enableDayOverride(jour)}
-                          >
-                            {hasOverride
-                              ? <><i className="fas fa-times" style={{ marginRight: 4 }}></i>{t.pages.planning.removeOverride}</>
-                              : <><i className="fas fa-edit" style={{ marginRight: 4 }}></i>{t.pages.planning.customizeDay}</>
-                            }
-                          </button>
-                        </div>
-
-                        {/* Champs éditables par pause — visibles seulement si override actif */}
-                        {hasOverride && (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '0 14px 12px' }}>
-                            {ovPauses.slice(0, maxPauses).map((ov, idx) => {
-                              const colors = ['#ffa726', '#ab47bc'];
-                              const color  = colors[idx];
-                              return (
-                                <div key={idx} style={{
-                                  display: 'grid', gridTemplateColumns: '28px 1fr 100px 100px',
-                                  gap: 6, padding: '8px 10px',
-                                  background: `${color}08`, borderRadius: 6,
-                                  border: `1px solid ${color}30`,
-                                  opacity: ov.active ? 1 : .5,
-                                }}>
-                                  <div style={{ display: 'flex', alignItems: 'center' }}>
-                                    <button
-                                      onClick={() => toggleDayPauseActive(jour, idx)}
-                                      style={{
-                                        width: 20, height: 20, border: `2px solid ${color}`,
-                                        borderRadius: 3, background: ov.active ? color : 'transparent',
-                                        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                      }}
-                                    >
-                                      {ov.active && <i className="fas fa-check" style={{ fontSize: 9, color: '#fff' }}></i>}
-                                    </button>
-                                  </div>
-                                  <div>
-                                    <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>{t.pages.planning.labelField} {idx + 1}</div>
-                                    <input className="sms-input" style={{ height: 28, fontSize: 11 }}
-                                      value={ov.label} disabled={!ov.active}
-                                      onChange={e => updateDayPause(jour, idx, 'label', e.target.value)}
-                                    />
-                                  </div>
-                                  <div>
-                                    <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>{t.pages.planning.startField}</div>
-                                    <input type="time" className="sms-input" style={{ height: 28, fontSize: 11, padding: '0 4px' }}
-                                      value={ov.h_debut} disabled={!ov.active}
-                                      onChange={e => updateDayPause(jour, idx, 'h_debut', e.target.value)}
-                                    />
-                                  </div>
-                                  <div>
-                                    <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>{t.pages.planning.endField}</div>
-                                    <input type="time" className="sms-input" style={{ height: 28, fontSize: 11, padding: '0 4px' }}
-                                      value={ov.h_fin} disabled={!ov.active}
-                                      onChange={e => updateDayPause(jour, idx, 'h_fin', e.target.value)}
-                                    />
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <p style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic', margin: 0 }}>
-                {t.pages.planning.autoSave}
-              </p>
-            </div>
-
-            <div className="sms-modal-footer">
-              <button className="sms-btn sms-btn-primary sms-btn-sm" onClick={() => setShowPauseModal(false)}>
-                <i className="fas fa-check"></i> {t.pages.planning.closeBtn}
-              </button>
-            </div>
-          </div>
-        </div>
+        <PausesModal pauses={pauses} onClose={() => setShowPauseModal(false)}
+          onChanged={reloadPauses} />
       )}
 
       {/* ── Modal suppression ── */}

@@ -472,6 +472,13 @@ class Etudiant(models.Model):
         'Etablissement', on_delete=models.CASCADE, null=True, blank=True,
         db_column='etablissement_id', related_name='+',
     )
+    # Compte de connexion de l'élève (rôle ETUDIANT) : il ne voit que ses propres données
+    # (notes, absences, paiements…) — voir mixins.scope_queryset_to_etudiant.
+    utilisateur = models.OneToOneField(
+        'Utilisateur', on_delete=models.SET_NULL,
+        null=True, blank=True, db_column='utilisateur_id',
+        related_name='etudiant',
+    )
     class Meta:
         db_table = 'etudiant'
     def __str__(self):
@@ -1073,6 +1080,10 @@ class Evaluation(models.Model):
         help_text="Évaluation par compétences (primaire réformé) — alternative à `note`.",
     )
     obs_eval       = models.CharField(max_length=45, null=True, blank=True)
+    # Absence justifiée : pas de note, et l'évaluation est neutralisée dans la moyenne de
+    # l'élève (au lieu de compter 0 comme une absence non justifiée) — voir notes.py.
+    dispense       = models.BooleanField(default=False,
+                        help_text="Absence justifiée : évaluation neutralisée dans la moyenne")
     code_periode   = models.ForeignKey(Periode,        on_delete=models.CASCADE,  db_column='code_periode')
     # FIX: db_column standardisé en snake_case (était 'code_typeEval')
     code_type_eval = models.ForeignKey(TypeEvaluation, on_delete=models.CASCADE,  db_column='code_type_eval')
@@ -1093,8 +1104,9 @@ class Evaluation(models.Model):
     def clean(self):
         from django.core.exceptions import ValidationError
         from .utils import check_event_date_bounds
-        if self.note is None and not self.appreciation:
-            raise ValidationError("Une évaluation doit avoir une note ou une appréciation (A/ECA/NA).")
+        if self.note is None and not self.appreciation and not self.dispense:
+            raise ValidationError("Une évaluation doit avoir une note, une appréciation (A/ECA/NA) "
+                                  "ou être marquée absence justifiée.")
         if self.date_eval and self.code_periode_id:
             annee = self.code_annee if self.code_annee_id else None
             erreur = check_event_date_bounds(self.date_eval, annee, self.code_periode)
@@ -1102,6 +1114,9 @@ class Evaluation(models.Model):
                 raise ValidationError({'date_eval': f"La date de l'évaluation est {erreur}."})
     def save(self, *args, **kwargs):
         from .notes import appreciation_depuis_note, type_etab_classe
+        if self.dispense:
+            # Absence justifiée : ni note ni appréciation.
+            self.note, self.appreciation = None, None
         # Primaire : l'appréciation suit toujours la note (00-09 NA, 10-14 ECA, 15-20 A).
         # Ailleurs, une note n'est pas accompagnée d'appréciation.
         if self.note is not None:
@@ -1113,10 +1128,14 @@ class Evaluation(models.Model):
         return f"Eval {self.code_eval} — {' · '.join(p for p in parts if p)}"
 
 class FicheNotes(models.Model):
+    # Circuit : l'enseignant saisit (BROUILLON) puis soumet (SOUMIS) ; le censeur ou
+    # l'administration valide (VALIDE), ce qui reporte les notes dans Evaluation.
+    # IMPORTE = ancien statut, équivalent à VALIDE.
     STATUT_CHOICES = [
         ('BROUILLON', 'Brouillon'),
-        ('VALIDE',    'Validé'),
-        ('IMPORTE',   'Importé'),
+        ('SOUMIS',    'Soumise au censeur'),
+        ('VALIDE',    'Validée'),
+        ('IMPORTE',   'Importée (ancien statut)'),
     ]
     code_fiche      = models.AutoField(primary_key=True)
     code_matiere    = models.ForeignKey(Matiere,        on_delete=models.RESTRICT, db_column='code_matiere')
@@ -1151,6 +1170,27 @@ class FicheNotes(models.Model):
     def __str__(self):
         return f"Fiche {self.code_fiche} — {self.code_matiere} — {self.statut}"
 
+class ClotureNotes(models.Model):
+    """
+    Période close pour une classe, après le conseil de classe : plus aucune note de cette
+    classe sur cette période (ni sur ses séquences) ne peut être ajoutée, modifiée ou
+    supprimée tant que la période n'est pas rouverte (voir notes.verifier_periode_ouverte).
+    """
+    id            = models.AutoField(primary_key=True)
+    etablissement = models.ForeignKey(
+        'Etablissement', on_delete=models.CASCADE, null=True, blank=True,
+        db_column='etablissement_id', related_name='+',
+    )
+    code_classe   = models.ForeignKey(Classe,  on_delete=models.CASCADE, db_column='code_classe')
+    code_periode  = models.ForeignKey(Periode, on_delete=models.CASCADE, db_column='code_periode')
+    cloturee_le   = models.DateTimeField(auto_now_add=True)
+    cloturee_par  = models.CharField(max_length=50, blank=True, default='')
+
+    class Meta:
+        db_table        = 'cloture_notes'
+        unique_together = (('code_classe', 'code_periode'),)
+
+
 class FicheNotesDetail(models.Model):
     id           = models.AutoField(primary_key=True)
     code_fiche   = models.ForeignKey(FicheNotes, on_delete=models.CASCADE, db_column='code_fiche')
@@ -1160,6 +1200,8 @@ class FicheNotesDetail(models.Model):
     # quelle dans Evaluation.appreciation lors de l'import (voir FicheNotesViewSet.importer).
     appreciation = models.CharField(max_length=3, null=True, blank=True, choices=APPRECIATION_CHOICES)
     absent       = models.BooleanField(default=False)
+    # Absence justifiée (certificat médical…) : neutralisée au lieu de compter 0.
+    justifie     = models.BooleanField(default=False)
     observation  = models.CharField(max_length=100, null=True, blank=True)
     class Meta:
         db_table        = 'fiche_notes_detail'
@@ -1243,6 +1285,33 @@ class Planning(models.Model):
             return f"{cours} — {self.code_jour} {self.h_debut}-{self.h_fin} ({self.get_type_seance_display()})"
         return f"{cours} — Intensif {self.date_debut} → {self.date_fin} ({self.get_type_seance_display()})"
 
+
+class PauseHoraire(models.Model):
+    """
+    Pause de l'emploi du temps d'une école (récréation, pause déjeuner). Sans jour, elle vaut
+    pour toute la semaine ; les pauses propres à un jour remplacent celles de la semaine pour
+    ce jour. Aucun cours ne peut la chevaucher (voir api/horaires.py).
+    """
+    id            = models.AutoField(primary_key=True)
+    etablissement = models.ForeignKey(
+        'Etablissement', on_delete=models.CASCADE, null=True, blank=True,
+        db_column='etablissement_id', related_name='+',
+    )
+    libelle   = models.CharField(max_length=30, default='Pause')
+    code_jour = models.ForeignKey(
+        Jour, on_delete=models.CASCADE, null=True, blank=True, db_column='code_jour',
+        help_text="Vide = tous les jours",
+    )
+    h_debut   = models.TimeField()
+    h_fin     = models.TimeField()
+
+    class Meta:
+        db_table = 'pause_horaire'
+        ordering = ['h_debut']
+
+    def __str__(self):
+        return f"{self.libelle} {self.h_debut:%H:%M}-{self.h_fin:%H:%M}"
+
 class RapportCours(models.Model):
     code_lgnrapport = models.AutoField(primary_key=True)
     code_matiere    = models.ForeignKey(Matiere,    on_delete=models.RESTRICT, db_column='code_matiere')
@@ -1294,6 +1363,8 @@ class Absence(models.Model):
     mle_etudiant = models.ForeignKey(Etudiant, on_delete=models.CASCADE, db_column='mle_etudiant')
     present      = models.BooleanField(default=False)
     signe        = models.BooleanField(default=False)
+    # Présent mais arrivé en retard : nombre de minutes (0 = à l'heure).
+    retard_minutes = models.PositiveSmallIntegerField(default=0)
     motif        = models.CharField(max_length=100, null=True, blank=True)
     justifiee    = models.BooleanField(default=False)
     created_at   = models.DateTimeField(auto_now_add=True)
@@ -1303,6 +1374,44 @@ class Absence(models.Model):
     def __str__(self):
         statut = 'Présent' if self.present else 'Absent'
         return f"{self.mle_etudiant} — {self.code_seance} — {statut}"
+
+
+class Appel(models.Model):
+    """
+    Appel journalier d'une classe, le matin ou l'après-midi — surtout au primaire, où un
+    même maître fait l'appel pour toute la demi-journée (voir api/vie_scolaire.py).
+    """
+    CRENEAU_CHOICES = [('MATIN', 'Matin'), ('APRES_MIDI', 'Après-midi')]
+    id            = models.AutoField(primary_key=True)
+    etablissement = models.ForeignKey(
+        'Etablissement', on_delete=models.CASCADE, null=True, blank=True,
+        db_column='etablissement_id', related_name='+',
+    )
+    code_classe   = models.ForeignKey(Classe, on_delete=models.CASCADE, db_column='code_classe')
+    date          = models.DateField()
+    creneau       = models.CharField(max_length=12, default='MATIN', choices=CRENEAU_CHOICES)
+    fait_par      = models.CharField(max_length=50, blank=True, default='')
+    created_at    = models.DateTimeField(auto_now_add=True)
+    updated_at    = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table        = 'appel'
+        unique_together = (('code_classe', 'date', 'creneau'),)
+
+
+class AppelLigne(models.Model):
+    STATUT_CHOICES = [('PRESENT', 'Présent'), ('ABSENT', 'Absent'), ('RETARD', 'En retard')]
+    id             = models.AutoField(primary_key=True)
+    appel          = models.ForeignKey(Appel, on_delete=models.CASCADE, related_name='lignes', db_column='appel_id')
+    mle_etudiant   = models.ForeignKey(Etudiant, on_delete=models.CASCADE, db_column='mle_etudiant')
+    statut         = models.CharField(max_length=8, default='PRESENT', choices=STATUT_CHOICES)
+    minutes_retard = models.PositiveSmallIntegerField(default=0)
+    justifiee      = models.BooleanField(default=False)
+    motif          = models.CharField(max_length=100, null=True, blank=True)
+
+    class Meta:
+        db_table        = 'appel_ligne'
+        unique_together = (('appel', 'mle_etudiant'),)
 
 
 # ─────────────────────────────────────────

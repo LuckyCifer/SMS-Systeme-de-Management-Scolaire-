@@ -95,6 +95,38 @@ def type_etab_courant(request):
     return Etablissement.objects.filter(pk=etab_id).values_list('type_etab', flat=True).first()
 
 
+def is_etudiant(request):
+    profile = get_utilisateur_profile(request)
+    return bool(profile and profile.role == 'ETUDIANT')
+
+
+def get_etudiant_profile(request):
+    """
+    Fiche Etudiant du compte ÉLÈVE connecté : le lien Etudiant.utilisateur, ou à défaut un
+    élève de la même école dont le matricule est le login. None sinon (accès refusé par défaut).
+    """
+    if not is_etudiant(request):
+        return None
+    if not hasattr(request, '_sms_etudiant_profile'):
+        from .models import Etudiant
+        profile = get_utilisateur_profile(request)
+        etudiant = Etudiant.objects.filter(utilisateur=profile).first() or Etudiant.objects.filter(
+            pk=profile.login, etablissement_id=profile.etablissement_id).first()
+        request._sms_etudiant_profile = etudiant
+    return request._sms_etudiant_profile
+
+
+def scope_queryset_to_etudiant(request, qs, lookup='mle_etudiant'):
+    """
+    Compte ÉLÈVE : ne garde que ses propres lignes (`lookup` = chemin vers l'élève).
+    No-op pour tout autre rôle.
+    """
+    if not is_etudiant(request):
+        return qs
+    etudiant = get_etudiant_profile(request)
+    return qs.filter(**{lookup: etudiant.pk}) if etudiant else qs.none()
+
+
 def is_enseignant(request):
     profile = get_utilisateur_profile(request)
     return bool(profile and profile.role == 'ENSEIGNANT')
@@ -188,17 +220,18 @@ class EtablissementFilterMixin:
         # l'école ne peut pas être déterminée, jamais une vue « toutes écoles ».
         return qs.filter(etablissement_id=etab_id) if etab_id else qs.none()
 
-    def _save_dans_etablissement(self, serializer, action):
+    def _save_dans_etablissement(self, serializer, action, detail=None):
         etab_id = self.get_etablissement_id()
         extra = {}
         if etab_id and _has_etab_field(serializer.Meta.model):
             extra['etablissement_id'] = etab_id
         instance = serializer.save(**extra)
-        log_action(
-            self.request, action,
-            self.__class__.__name__.replace('ViewSet', ''),
-            getattr(instance, instance._meta.pk.name, ''),
-        )
+        if detail != '':  # detail='' : l'appelant écrit sa propre trace
+            log_action(
+                self.request, action,
+                self.__class__.__name__.replace('ViewSet', ''),
+                getattr(instance, instance._meta.pk.name, ''), detail or '',
+            )
         return instance
 
     def perform_create(self, serializer):

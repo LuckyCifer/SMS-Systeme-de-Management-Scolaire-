@@ -189,7 +189,7 @@ export const generateBulletin = async (etudiant, resultat, periode, etab) => {
         <td style="padding:5px 9px;font-size:11px;">${m.lib_matiere}</td>
         <td style="padding:5px 9px;text-align:center;color:#777;font-size:11px;">${m.nb_evals ?? '—'}</td>
         <td style="padding:5px 9px;text-align:center;color:#555;font-size:11px;">${m.poids ?? '—'}</td>
-        <td style="padding:5px 9px;text-align:center;font-weight:700;color:${color};font-size:12px;">${moy !== null ? fmt(moy) + '/20' : '—'}</td>
+        <td style="padding:5px 9px;text-align:center;font-weight:700;color:${color};font-size:12px;">${moy !== null ? fmt(moy) + '/20' : (m.dispense ? 'Abs. justifiée' : '—')}</td>
         ${isPreBac ? `<td style="padding:5px 9px;text-align:center;color:#555;font-size:11px;">${points}</td>` : ''}
         <td style="padding:5px 9px;text-align:center;font-size:11px;color:${color};">
           ${isPrimaire ? appreciationHtml(m.appreciation) : (moy !== null ? mentionMatiere(moy) : '—')}

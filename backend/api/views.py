@@ -29,11 +29,14 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 from .utils import get_client_ip, log_action
-from .notes import calculer_resultats, deliberer, generer_sequences, series_du_niveau
+from . import vie_scolaire
+from . import horaires
+from .notes import (calculer_resultats, deliberer, generer_sequences, series_du_niveau, importer_fiche,
+                    periode_close, verifier_periode_ouverte)
 from .permissions import RoleBasedPermission
 from .mixins import (
     EtablissementFilterMixin, EtablissementParRelationMixin, trusted_etablissement_header, type_etab_courant,
-    is_super_admin, get_utilisateur_profile,
+    is_super_admin, get_utilisateur_profile, is_etudiant, get_etudiant_profile, scope_queryset_to_etudiant,
     scope_queryset_to_enseignant, scope_queryset_to_enseignant_cours, assert_enseignant_teaches,
     is_enseignant, get_enseignant_profile,
 )
@@ -51,7 +54,7 @@ from .models import (
     Examen, Epreuve, Convocation, RapportStatistique, RapportAssiduite,
     Decision, Diplome, CarteEtudiant, Stage, LettreAdmission,
     BadgeAcces, DocumentGenere, AuditLog,
-    NiveauScolaire, ConfigBulletin, CoefficientMatiere,
+    NiveauScolaire, ConfigBulletin, CoefficientMatiere, ClotureNotes, Appel, PauseHoraire,
 )
 from .serializers import (
     TypeEtabSerializer, BatimentSerializer, SalleSerializer, JourSerializer,
@@ -76,7 +79,8 @@ from .serializers import (
     DecisionSerializer, DiplomeSerializer, CarteEtudiantSerializer,
     StageSerializer, LettreAdmissionSerializer, BadgeAccesSerializer,
     DocumentGenereSerializer, AuditLogSerializer,
-    NiveauScolaireSerializer, ConfigBulletinSerializer, CoefficientMatiereSerializer,
+    NiveauScolaireSerializer, ConfigBulletinSerializer, CoefficientMatiereSerializer, ClotureNotesSerializer, AppelSerializer,
+    PauseHoraireSerializer,
 )
 
 
@@ -133,6 +137,19 @@ def _scoped_queryset(viewset_cls, request):
 class SMSBaseViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, RoleBasedPermission]
     filter_backends    = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    # Compte ÉLÈVE : `etudiant_lookup` = chemin vers l'élève (il ne voit que ses lignes) ;
+    # `interdit_etudiant` = données réservées au personnel (aucune ligne).
+    etudiant_lookup   = None
+    interdit_etudiant = False
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if is_etudiant(self.request):
+            if self.interdit_etudiant:
+                return qs.none()
+            if self.etudiant_lookup:
+                return scope_queryset_to_etudiant(self.request, qs, self.etudiant_lookup)
+        return qs
 
     def create(self, request, *args, **kwargs):
         try:
@@ -177,7 +194,11 @@ class SMSBaseViewSet(viewsets.ModelViewSet):
             )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+    def verifier_ecriture(self, instance):
+        """Crochet : lever une exception pour refuser la suppression de `instance`."""
+
     def perform_destroy(self, instance):
+        self.verifier_ecriture(instance)
         pk = getattr(instance, instance._meta.pk.name, '')
         log_action(self.request, 'DELETE',
                    self.__class__.__name__.replace('ViewSet', ''), pk)
@@ -190,6 +211,8 @@ class SMSBaseViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'Aucun identifiant fourni.'},
                             status=status.HTTP_400_BAD_REQUEST)
         qs    = self.get_queryset().filter(pk__in=ids)
+        for instance in qs:
+            self.verifier_ecriture(instance)
         count = qs.count()
         log_action(request, 'BULK_DELETE',
                    self.__class__.__name__.replace('ViewSet', ''),
@@ -605,6 +628,7 @@ class ClasseViewSet(EtablissementFilterMixin, SMSBaseViewSet):
 
     @action(detail=True, methods=['get'], url_path='export-csv')
     def export_csv(self, request, pk=None):
+        pk = self.get_object().pk  # contrôle d'accès (école)
         annee = Annee.objects.filter(statut='EN COURS').first()
         inscriptions = Inscription.objects.filter(
             code_classe=pk, code_annee=annee
@@ -634,6 +658,7 @@ class MentionClasseViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
 
 # ── Personnes ─────────────────────────────────────────────────────────────────
 class EtudiantViewSet(EtablissementFilterMixin, SMSBaseViewSet):
+    etudiant_lookup = 'mle_etudiant'
     queryset         = Etudiant.objects.select_related('code_dep', 'code_sp').all()
     serializer_class = EtudiantSerializer
     search_fields    = ['nom', 'prenom', 'mle_etudiant', 'email', 'tel', 'numero_cni']
@@ -965,32 +990,38 @@ class EtudiantViewSet(EtablissementFilterMixin, SMSBaseViewSet):
 
     @action(detail=True, methods=['get'], url_path='inscriptions')
     def inscriptions(self, request, pk=None):
+        pk = self.get_object().pk  # contrôle d'accès (école, compte élève)
         qs = Inscription.objects.filter(mle_etudiant=pk).select_related('code_classe', 'code_annee')
         return Response(InscriptionSerializer(qs, many=True).data)
 
     @action(detail=True, methods=['get'], url_path='paiements')
     def paiements(self, request, pk=None):
+        pk = self.get_object().pk  # contrôle d'accès (école, compte élève)
         qs = Paiement.objects.filter(mle_etudiant=pk).select_related('code_tranche', 'code_annee')
         return Response(PaiementSerializer(qs, many=True).data)
 
     @action(detail=True, methods=['get'], url_path='evaluations')
     def evaluations(self, request, pk=None):
+        pk = self.get_object().pk  # contrôle d'accès (école, compte élève)
         qs = Evaluation.objects.filter(mle_etudiant=pk).select_related(
             'code_matiere', 'code_classe', 'code_periode', 'code_type_eval')
         return Response(EvaluationSerializer(qs, many=True).data)
 
     @action(detail=True, methods=['get'], url_path='tuteurs')
     def tuteurs(self, request, pk=None):
+        pk = self.get_object().pk  # contrôle d'accès (école, compte élève)
         qs = EtudiantTuteur.objects.filter(mle_etudiant=pk).select_related('code_tuteur')
         return Response(EtudiantTuteurSerializer(qs, many=True).data)
 
     @action(detail=True, methods=['get'], url_path='absences')
     def absences(self, request, pk=None):
+        pk = self.get_object().pk  # contrôle d'accès (école, compte élève)
         qs = Absence.objects.filter(mle_etudiant=pk).select_related('code_seance')
         return Response(AbsenceSerializer(qs, many=True).data)
 
     @action(detail=True, methods=['get'], url_path='absences-stats')
     def absences_stats(self, request, pk=None):
+        pk = self.get_object().pk  # contrôle d'accès (école, compte élève)
         """Retourne les heures d'absence totales et par matière pour un étudiant."""
         absences = Absence.objects.filter(
             mle_etudiant=pk, present=False
@@ -1022,6 +1053,7 @@ class EtudiantViewSet(EtablissementFilterMixin, SMSBaseViewSet):
 
     @action(detail=True, methods=['get'], url_path='decisions')
     def decisions(self, request, pk=None):
+        pk = self.get_object().pk  # contrôle d'accès (école, compte élève)
         qs = Decision.objects.filter(mle_etudiant=pk).select_related('code_annee', 'code_classe')
         return Response(DecisionSerializer(qs, many=True).data)
 
@@ -1178,11 +1210,14 @@ class EnseignantViewSet(EtablissementFilterMixin, SMSBaseViewSet):
 
     @action(detail=True, methods=['get'], url_path='planning')
     def planning(self, request, pk=None):
-        qs = Planning.objects.filter(mle_ens=pk).select_related('code_matiere', 'code_classe', 'code_jour')
+        pk = self.get_object().pk  # contrôle d'accès (école)
+        qs = Planning.objects.filter(code_cours__mle_ens=pk).select_related(
+            'code_cours__code_matiere', 'code_cours__code_classe', 'code_jour', 'code_salle')
         return Response(PlanningSerializer(qs, many=True).data)
 
     @action(detail=True, methods=['get'], url_path='seances')
     def seances(self, request, pk=None):
+        pk = self.get_object().pk  # contrôle d'accès (école)
         qs = Seance.objects.filter(mle_ens=pk).select_related('code_matiere', 'code_classe')
         return Response(SeanceSerializer(qs, many=True).data)
 
@@ -1197,6 +1232,9 @@ class UtilisateurViewSet(viewsets.ModelViewSet):
         if is_super_admin(self.request):
             etab_id = trusted_etablissement_header(self.request)
             return qs.filter(Q(etablissement_id=etab_id) | Q(role='SUPER_ADMIN'))
+
+        if is_etudiant(self.request):
+            return qs.filter(login=self.request.user.username)
 
         # Utilisateur normal : uniquement les comptes de son propre établissement, dérivé de
         # son profil en base (jamais d'un header client), + les comptes SUPER_ADMIN.
@@ -1229,12 +1267,14 @@ class UtilisateurViewSet(viewsets.ModelViewSet):
         log_action(self.request, 'UPDATE', 'Utilisateur', instance.login)
 
 class TuteurViewSet(EtablissementFilterMixin, SMSBaseViewSet):
+    interdit_etudiant = True  # données réservées au personnel
     queryset         = Tuteur.objects.all()
     serializer_class = TuteurSerializer
     search_fields    = ['nom', 'prenom', 'tel', 'email']
     filterset_fields = ['lien_parente']
 
 class EtudiantTuteurViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
+    etudiant_lookup = 'mle_etudiant'
     etablissement_lookups = ('mle_etudiant__etablissement',)
     queryset         = EtudiantTuteur.objects.select_related('mle_etudiant', 'code_tuteur').all()
     serializer_class = EtudiantTuteurSerializer
@@ -1243,6 +1283,7 @@ class EtudiantTuteurViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
 
 # ── Personnel administratif et de soutien ─────────────────────────────────────
 class PersonnelViewSet(EtablissementFilterMixin, SMSBaseViewSet):
+    interdit_etudiant = True  # données réservées au personnel
     queryset         = Personnel.objects.select_related('etablissement', 'utilisateur').all()
     serializer_class = PersonnelSerializer
     filterset_fields = ['poste', 'categorie', 'type_contrat', 'actif']
@@ -1322,6 +1363,7 @@ class FraisViewSet(EtablissementFilterMixin, SMSBaseViewSet):
     filterset_fields = ['type_frais', 'code_annee']
 
 class InscriptionViewSet(EtablissementFilterMixin, SMSBaseViewSet):
+    etudiant_lookup = 'mle_etudiant'
     queryset         = Inscription.objects.select_related(
         'code_classe__code_niveau', 'mle_etudiant', 'code_annee').all()
     serializer_class = InscriptionSerializer
@@ -1379,6 +1421,7 @@ class InscriptionViewSet(EtablissementFilterMixin, SMSBaseViewSet):
         return response
 
 class FraisInscriptionViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
+    etudiant_lookup = 'code_inscription__mle_etudiant'
     etablissement_lookups = ('code_inscription__etablissement',)
     queryset         = FraisInscription.objects.select_related(
         'code_inscription', 'code_frais').all()
@@ -1386,6 +1429,7 @@ class FraisInscriptionViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
     filterset_fields = ['code_inscription', 'code_frais']
 
 class PaiementViewSet(EtablissementFilterMixin, SMSBaseViewSet):
+    etudiant_lookup = 'mle_etudiant'
     queryset         = Paiement.objects.select_related(
         'mle_etudiant__code_dep', 'mle_etudiant__code_sp',
         'code_tranche', 'code_annee').all()
@@ -1437,6 +1481,7 @@ class PaiementViewSet(EtablissementFilterMixin, SMSBaseViewSet):
         return response
 
 class PaiementSalaireViewSet(EtablissementFilterMixin, SMSBaseViewSet):
+    interdit_etudiant = True  # données réservées au personnel
     """
     Paiements de salaire du personnel — délibérément séparé de PaiementViewSet (frais
     scolarité/inscription des étudiants), qui suit une logique métier différente.
@@ -1479,11 +1524,13 @@ class PaiementSalaireViewSet(EtablissementFilterMixin, SMSBaseViewSet):
         return response
 
 class MoratoireViewSet(EtablissementFilterMixin, SMSBaseViewSet):
+    etudiant_lookup = 'mle_etudiant'
     queryset         = Moratoire.objects.select_related('mle_etudiant').all()
     serializer_class = MoratoireSerializer
     filterset_fields = ['mle_etudiant']
 
 class FactureViewSet(EtablissementFilterMixin, SMSBaseViewSet):
+    etudiant_lookup = 'mle_etudiant'
     queryset         = Facture.objects.select_related('mle_etudiant').all()
     serializer_class = FactureSerializer
     search_fields    = ['numero_facture', 'mle_etudiant__nom']
@@ -1503,6 +1550,7 @@ class FactureViewSet(EtablissementFilterMixin, SMSBaseViewSet):
         return Response(result)
 
 class FactureDetailViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
+    etudiant_lookup = 'code_facture__mle_etudiant'
     etablissement_lookups = ('code_facture__etablissement',)
     queryset         = FactureDetail.objects.select_related('code_facture').all()
     serializer_class = FactureDetailSerializer
@@ -1583,6 +1631,7 @@ class PeriodeViewSet(SMSBaseViewSet):
         return qs
 
 class EvaluationViewSet(EtablissementFilterMixin, SMSBaseViewSet):
+    etudiant_lookup = 'mle_etudiant'
     queryset         = Evaluation.objects.select_related(
         'mle_etudiant', 'code_matiere', 'code_classe', 'code_periode', 'code_type_eval').all()
     serializer_class = EvaluationSerializer
@@ -1607,13 +1656,27 @@ class EvaluationViewSet(EtablissementFilterMixin, SMSBaseViewSet):
             serializer.validated_data['code_matiere'].pk,
             serializer.validated_data['code_classe'].pk,
         )
+        verifier_periode_ouverte(serializer.validated_data['code_classe'].pk,
+                                 serializer.validated_data['code_periode'].pk)
         super().perform_create(serializer)
 
     def perform_update(self, serializer):
-        code_matiere = serializer.validated_data.get('code_matiere', serializer.instance.code_matiere)
-        code_classe  = serializer.validated_data.get('code_classe',  serializer.instance.code_classe)
+        ancien       = serializer.instance
+        code_matiere = serializer.validated_data.get('code_matiere', ancien.code_matiere)
+        code_classe  = serializer.validated_data.get('code_classe',  ancien.code_classe)
+        code_periode = serializer.validated_data.get('code_periode', ancien.code_periode)
         assert_enseignant_teaches(self.request, code_matiere.pk, code_classe.pk)
-        super().perform_update(serializer)
+        verifier_periode_ouverte(ancien.code_classe_id, ancien.code_periode_id)
+        verifier_periode_ouverte(code_classe.pk, code_periode.pk)
+        avant = 'absence justifiée' if ancien.dispense else (ancien.note if ancien.note is not None else ancien.appreciation)
+        instance = self._save_dans_etablissement(serializer, 'UPDATE', detail='')
+        apres = 'absence justifiée' if instance.dispense else (instance.note if instance.note is not None else instance.appreciation)
+        if str(avant) != str(apres):
+            log_action(self.request, 'UPDATE', 'Evaluation', instance.pk,
+                       f'{instance.mle_etudiant_id} / {instance.code_matiere_id} : {avant} → {apres}')
+
+    def verifier_ecriture(self, instance):
+        verifier_periode_ouverte(instance.code_classe_id, instance.code_periode_id)
 
     @action(detail=False, methods=['get'], url_path='export-csv')
     def export_csv(self, request):
@@ -1659,6 +1722,12 @@ class EvaluationViewSet(EtablissementFilterMixin, SMSBaseViewSet):
         # Les filtres de l'URL (code_periode, mle_etudiant…) ne doivent pas restreindre
         # le calcul : le rang se calcule sur toute la classe et toutes ses séquences.
         base = self.get_queryset()
+        if is_etudiant(request):
+            etudiant = get_etudiant_profile(request)
+            if not etudiant:
+                return Response([])
+            mle_etudiant = etudiant.pk
+            base = Evaluation.objects.filter(etablissement_id=self.get_etablissement_id())
         try:
             resultats = calculer_resultats(base, code_classe, code_periode=code_periode,
                                            code_annee=code_annee)
@@ -1668,7 +1737,155 @@ class EvaluationViewSet(EtablissementFilterMixin, SMSBaseViewSet):
             resultats = [r for r in resultats if r['mle_etudiant'] == mle_etudiant]
         return Response(resultats)
 
+ROLES_GESTION_NOTES = {'SUPER_ADMIN', 'ADMIN', 'SCOLARITE', 'CENSEUR'}
+
+
+def exiger_role_gestion_notes(request, quoi):
+    from rest_framework.exceptions import PermissionDenied
+    profile = get_utilisateur_profile(request)
+    if not profile or profile.role not in ROLES_GESTION_NOTES:
+        raise PermissionDenied(f"Seuls le censeur et l'administration peuvent {quoi}.")
+
+
+class ClotureNotesViewSet(EtablissementFilterMixin, SMSBaseViewSet):
+    """
+    Clôture des notes d'une classe pour une période (après le conseil de classe) :
+    POST = clôturer, DELETE = rouvrir. Réservé au censeur et à l'administration.
+    """
+    queryset         = ClotureNotes.objects.select_related('code_classe', 'code_periode').all()
+    serializer_class = ClotureNotesSerializer
+    filterset_fields = ['code_classe', 'code_periode']
+    interdit_etudiant = True
+
+    def check_permissions(self, request):
+        super().check_permissions(request)
+        if request.method not in ('GET', 'HEAD', 'OPTIONS'):
+            exiger_role_gestion_notes(request, 'clôturer ou rouvrir une période')
+
+    def perform_create(self, serializer):
+        from rest_framework.exceptions import NotFound
+        classe = serializer.validated_data['code_classe']
+        if not _scoped_queryset(ClasseViewSet, self.request).filter(pk=classe.pk).exists():
+            raise NotFound('Classe introuvable.')
+        serializer.validated_data['cloturee_par'] = self.request.user.username
+        super().perform_create(serializer)
+        log_action(self.request, 'UPDATE', 'ClotureNotes', classe.pk,
+                   f"Clôture des notes : {classe.pk} / {serializer.validated_data['code_periode']}")
+
+    def perform_destroy(self, instance):
+        log_action(self.request, 'UPDATE', 'ClotureNotes', instance.code_classe_id,
+                   f'Réouverture des notes : {instance.code_classe_id} / {instance.code_periode}')
+        instance.delete()
+
+
+# ── Vie scolaire : appel journalier, absences du jour, alertes ────────────────
+ROLES_VIE_SCOLAIRE = {'SUPER_ADMIN', 'ADMIN', 'SCOLARITE', 'CENSEUR', 'SURVEILLANT_GENERAL', 'DIRECTION'}
+ROLES_JUSTIFICATION = {'SUPER_ADMIN', 'ADMIN', 'SCOLARITE', 'CENSEUR', 'SURVEILLANT_GENERAL'}
+
+
+def _date_param(valeur):
+    import datetime
+    from rest_framework.exceptions import ValidationError
+    if not valeur:
+        return datetime.date.today()
+    try:
+        return datetime.date.fromisoformat(valeur)
+    except ValueError:
+        raise ValidationError({'error': 'Date invalide (format AAAA-MM-JJ).'})
+
+
+class AppelViewSet(EtablissementFilterMixin, SMSBaseViewSet):
+    """
+    Appel journalier d'une classe (matin / après-midi). GET feuille = liste d'appel (présent
+    par défaut) ; POST enregistrer = enregistrement tout ou rien. Un enseignant ne fait
+    l'appel que dans les classes où il enseigne.
+    """
+    queryset          = Appel.objects.select_related('code_classe').all()
+    serializer_class  = AppelSerializer
+    filterset_fields  = ['code_classe', 'date', 'creneau']
+    interdit_etudiant = True
+
+    def _classe_autorisee(self, code_classe):
+        from rest_framework.exceptions import NotFound, PermissionDenied
+        if not _scoped_queryset(ClasseViewSet, self.request).filter(pk=code_classe).exists():
+            raise NotFound('Classe introuvable.')
+        enseignant = get_enseignant_profile(self.request)
+        if is_enseignant(self.request) and not (
+                enseignant and Cours.objects.filter(mle_ens=enseignant, code_classe=code_classe).exists()):
+            raise PermissionDenied("Vous n'enseignez pas dans cette classe.")
+
+    @action(detail=False, methods=['get'], url_path='feuille')
+    def feuille(self, request):
+        code_classe = request.query_params.get('code_classe')
+        creneau = request.query_params.get('creneau') or 'MATIN'
+        if not code_classe:
+            return Response({'error': 'code_classe est requis.'}, status=status.HTTP_400_BAD_REQUEST)
+        self._classe_autorisee(code_classe)
+        return Response(vie_scolaire.feuille_appel(code_classe, _date_param(request.query_params.get('date')), creneau))
+
+    @action(detail=False, methods=['post'], url_path='enregistrer')
+    def enregistrer(self, request):
+        code_classe = request.data.get('code_classe')
+        creneau = request.data.get('creneau') or 'MATIN'
+        if not code_classe or creneau not in dict(Appel.CRENEAU_CHOICES):
+            return Response({'error': 'code_classe et un créneau valide sont requis.'}, status=status.HTTP_400_BAD_REQUEST)
+        self._classe_autorisee(code_classe)
+        appel, erreurs = vie_scolaire.enregistrer_appel(
+            self.get_etablissement_id(), code_classe, _date_param(request.data.get('date')),
+            creneau, request.data.get('lignes') or [], request.user.username)
+        if erreurs:
+            return Response({'error': ' '.join(erreurs)}, status=status.HTTP_400_BAD_REQUEST)
+        nb_abs = appel.lignes.filter(statut='ABSENT').count()
+        log_action(request, 'UPDATE', 'Appel', appel.pk, f'Appel {code_classe} {appel.date} {creneau} : {nb_abs} absent(s)')
+        return Response({'appel': appel.pk, 'absents': nb_abs})
+
+
+class VieScolaireViewSet(viewsets.ViewSet):
+    """Vue du surveillant général : absences et retards du jour, justification, alertes."""
+    permission_classes = [IsAuthenticated]
+
+    def _exiger(self, request, roles):
+        from rest_framework.exceptions import PermissionDenied
+        profile = get_utilisateur_profile(request)
+        if not profile or profile.role not in roles:
+            raise PermissionDenied("Votre rôle ne vous autorise pas à accéder à la vie scolaire.")
+        etab_id = trusted_etablissement_header(request)
+        if not etab_id:
+            raise PermissionDenied('Aucun établissement sélectionné.')
+        return etab_id
+
+    @action(detail=False, methods=['get'], url_path='jour')
+    def jour(self, request):
+        etab_id = self._exiger(request, ROLES_VIE_SCOLAIRE)
+        date = _date_param(request.query_params.get('date'))
+        return Response({'date': date.isoformat(), 'lignes': vie_scolaire.evenements_du_jour(etab_id, date)})
+
+    @action(detail=False, methods=['post'], url_path='justifier')
+    def justifier(self, request):
+        etab_id = self._exiger(request, ROLES_JUSTIFICATION)
+        ok = vie_scolaire.justifier(etab_id, request.data.get('source'), request.data.get('id'),
+                                    request.data.get('justifiee', True), request.data.get('motif'))
+        if not ok:
+            return Response({'error': 'Absence introuvable.'}, status=status.HTTP_404_NOT_FOUND)
+        log_action(request, 'UPDATE', 'Absence', request.data.get('id'),
+                   f"{'Justifiée' if request.data.get('justifiee', True) else 'Non justifiée'} : {request.data.get('motif') or ''}")
+        return Response({'ok': True})
+
+    @action(detail=False, methods=['get'], url_path='alertes')
+    def alertes(self, request):
+        etab_id = self._exiger(request, ROLES_VIE_SCOLAIRE)
+        q = request.query_params
+        try:
+            seuils = dict(seuil_avertissement=float(q.get('seuil_avertissement', 10)),
+                          seuil_conseil=float(q.get('seuil_conseil', 20)),
+                          heures_demi_journee=float(q.get('heures_demi_journee', vie_scolaire.HEURES_PAR_DEMI_JOURNEE)))
+        except ValueError:
+            return Response({'error': 'Seuils invalides.'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(vie_scolaire.alertes(etab_id, q.get('code_annee'), **seuils))
+
+
 class FicheNotesViewSet(EtablissementFilterMixin, SMSBaseViewSet):
+    interdit_etudiant = True  # données réservées au personnel
     queryset         = FicheNotes.objects.select_related(
         'code_matiere', 'code_classe', 'mle_ens', 'code_periode', 'code_type_eval').all()
     serializer_class = FicheNotesSerializer
@@ -1697,47 +1914,127 @@ class FicheNotesViewSet(EtablissementFilterMixin, SMSBaseViewSet):
         self._assert_mle_ens_is_self(mle_ens)
         super().perform_update(serializer)
 
+    # ── Circuit de la fiche ──────────────────────────────────────────────────
+    def _verifier_modifiable(self, fiche):
+        """Notes modifiables : brouillon (ou fiche soumise, pour le censeur) et période ouverte."""
+        from rest_framework.exceptions import PermissionDenied
+        profile = get_utilisateur_profile(self.request)
+        gestion = bool(profile and profile.role in ROLES_GESTION_NOTES)
+        if fiche.statut in ('VALIDE', 'IMPORTE'):
+            raise PermissionDenied('Fiche validée : demandez sa réouverture au censeur pour la modifier.')
+        if fiche.statut == 'SOUMIS' and not gestion:
+            raise PermissionDenied('Fiche soumise au censeur : elle ne peut plus être modifiée par l\'enseignant.')
+        verifier_periode_ouverte(fiche.code_classe_id, fiche.code_periode_id)
+
+    @action(detail=True, methods=['post'], url_path='saisir')
+    def saisir(self, request, pk=None):
+        """
+        Enregistre toutes les notes de la fiche en une seule opération (tout ou rien).
+        Body : {notes: [{mle_etudiant, note, absent, justifie, observation}]} — note sur le
+        barème de la fiche. Les élèves non transmis gardent leur saisie précédente.
+        """
+        from django.db import transaction
+        fiche = self.get_object()
+        self._verifier_modifiable(fiche)
+        lignes  = request.data.get('notes') or []
+        # Élèves inscrits dans la classe POUR L'ANNÉE de la fiche (un élève passé en classe
+        # supérieure garde son inscription de l'an dernier dans son ancienne classe).
+        inscrits = set(Inscription.objects.filter(code_classe=fiche.code_classe_id, code_annee=fiche.code_annee_id)
+                       .values_list('mle_etudiant_id', flat=True))
+        erreurs = []
+        propres = []
+        for l in lignes:
+            mle, note = l.get('mle_etudiant'), l.get('note')
+            absent = bool(l.get('absent'))
+            if mle not in inscrits:
+                erreurs.append(f'{mle} : élève non inscrit dans cette classe.')
+                continue
+            if absent or note in (None, ''):
+                note = None
+            else:
+                try:
+                    note = float(note)
+                except (TypeError, ValueError):
+                    erreurs.append(f'{mle} : note invalide.')
+                    continue
+                if not 0 <= note <= float(fiche.bareme):
+                    erreurs.append(f'{mle} : la note doit être comprise entre 0 et {fiche.bareme}.')
+                    continue
+            propres.append((mle, note, absent, absent and bool(l.get('justifie')),
+                            (l.get('observation') or '')[:100] or None))
+        if erreurs:
+            return Response({'error': ' '.join(erreurs)}, status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            for mle, note, absent, justifie, obs in propres:
+                FicheNotesDetail.objects.update_or_create(
+                    code_fiche=fiche, mle_etudiant_id=mle,
+                    defaults={'note': note, 'absent': absent, 'justifie': justifie,
+                              'observation': obs, 'appreciation': None},
+                )
+        log_action(request, 'UPDATE', 'FicheNotes', pk, f'{len(propres)} notes saisies')
+        return Response({'enregistrees': len(propres), 'statut': fiche.statut})
+
+    @action(detail=True, methods=['post'], url_path='soumettre')
+    def soumettre(self, request, pk=None):
+        """L'enseignant transmet sa fiche au censeur ; il ne peut plus la modifier ensuite."""
+        fiche = self.get_object()
+        if fiche.statut != 'BROUILLON':
+            return Response({'error': 'Seule une fiche en brouillon peut être soumise.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        fiche.statut = 'SOUMIS'
+        fiche.save(update_fields=['statut'])
+        log_action(request, 'UPDATE', 'FicheNotes', pk, 'Fiche soumise au censeur')
+        return Response({'statut': fiche.statut})
+
     @action(detail=True, methods=['post'], url_path='valider')
     def valider(self, request, pk=None):
+        """Validation par le censeur ou l'administration : les notes sont reportées aussitôt."""
+        from django.db import transaction
+        exiger_role_gestion_notes(request, 'valider une fiche de notes')
         fiche = self.get_object()
-        fiche.statut = 'VALIDE'
-        fiche.save()
-        log_action(request, 'UPDATE', 'FicheNotes', pk, 'Validation de la fiche')
+        if fiche.statut in ('VALIDE', 'IMPORTE'):
+            return Response({'error': 'Cette fiche est déjà validée.'}, status=status.HTTP_400_BAD_REQUEST)
+        verifier_periode_ouverte(fiche.code_classe_id, fiche.code_periode_id)
+        with transaction.atomic():
+            reportees = importer_fiche(fiche)
+            fiche.statut = 'VALIDE'
+            fiche.save(update_fields=['statut'])
+        log_action(request, 'UPDATE', 'FicheNotes', pk, f'Fiche validée : {reportees} notes reportées')
+        return Response({'statut': fiche.statut, 'imported': reportees})
+
+    @action(detail=True, methods=['post'], url_path='rouvrir')
+    def rouvrir(self, request, pk=None):
+        """Le censeur rouvre une fiche (soumise ou validée) pour correction ; à revalider ensuite."""
+        exiger_role_gestion_notes(request, 'rouvrir une fiche de notes')
+        fiche = self.get_object()
+        verifier_periode_ouverte(fiche.code_classe_id, fiche.code_periode_id)
+        fiche.statut = 'BROUILLON'
+        fiche.save(update_fields=['statut'])
+        log_action(request, 'UPDATE', 'FicheNotes', pk, 'Fiche rouverte pour correction')
         return Response({'statut': fiche.statut})
 
     @action(detail=True, methods=['post'], url_path='importer')
     def importer_evaluations(self, request, pk=None):
-        """Importe les notes de la fiche dans la table evaluation."""
-        fiche   = self.get_object()
-        details = FicheNotesDetail.objects.filter(code_fiche=fiche)
-        created = 0
-        for detail in details:
-            if detail.absent:
-                continue
-            if detail.note is None and not detail.appreciation:
-                continue
-            Evaluation.objects.update_or_create(
-                mle_etudiant=detail.mle_etudiant,
-                code_matiere=fiche.code_matiere,
-                code_classe=fiche.code_classe,
-                code_periode=fiche.code_periode,
-                code_type_eval=fiche.code_type_eval,
-                defaults={
-                    'note': detail.note,
-                    'appreciation': detail.appreciation,
-                    'date_eval': fiche.date_evaluation,
-                    'etablissement': fiche.etablissement,
-                    'code_annee': fiche.code_annee,
-                }
-            )
-            created += 1
-        fiche.statut = 'IMPORTE'
-        fiche.save()
-        log_action(request, 'CREATE', 'Evaluation', pk,
-                   f'{created} notes importées depuis fiche {pk}')
-        return Response({'imported': created, 'statut': fiche.statut})
+        """Ancien circuit (valider puis importer) : équivalent à la validation."""
+        return self.valider(request, pk)
 
 class FicheNotesDetailViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
+    def _verifier_fiche(self, fiche):
+        # Mêmes règles que la saisie groupée (statut de la fiche, période ouverte).
+        FicheNotesViewSet(request=self.request, format_kwarg=None, kwargs={})._verifier_modifiable(fiche)
+
+    def perform_create(self, serializer):
+        self._verifier_fiche(serializer.validated_data['code_fiche'])
+        super().perform_create(serializer)
+
+    def perform_update(self, serializer):
+        self._verifier_fiche(serializer.validated_data.get('code_fiche', serializer.instance.code_fiche))
+        super().perform_update(serializer)
+
+    def verifier_ecriture(self, instance):
+        self._verifier_fiche(instance.code_fiche)
+
+    etudiant_lookup = 'mle_etudiant'
     etablissement_lookups = ('code_fiche__etablissement',)
     queryset         = FicheNotesDetail.objects.select_related('code_fiche', 'mle_etudiant').all()
     serializer_class = FicheNotesDetailSerializer
@@ -1745,6 +2042,39 @@ class FicheNotesDetailViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
 
 
 # ── Planning & Rapports ───────────────────────────────────────────────────────
+class PauseHoraireViewSet(EtablissementFilterMixin, SMSBaseViewSet):
+    """
+    Pauses de l'emploi du temps de l'école connectée. Lecture pour tous ; écriture réservée
+    au censeur et à l'administration. Une pause ne peut pas chevaucher un cours programmé.
+    """
+    queryset         = PauseHoraire.objects.select_related('code_jour').all()
+    serializer_class = PauseHoraireSerializer
+    pagination_class = None
+    filterset_fields = ['code_jour']
+
+    def check_permissions(self, request):
+        super().check_permissions(request)
+        if request.method not in ('GET', 'HEAD', 'OPTIONS'):
+            exiger_role_gestion_notes(request, "modifier les pauses de l'emploi du temps")
+
+    def perform_destroy(self, instance):
+        # Supprimer la dernière pause propre à un jour y rétablit les pauses de la semaine :
+        # elles ne doivent pas tomber sur un cours de ce jour.
+        if instance.code_jour_id and not PauseHoraire.objects.filter(
+                etablissement_id=instance.etablissement_id, code_jour_id=instance.code_jour_id,
+        ).exclude(pk=instance.pk).exists():
+            for p in PauseHoraire.objects.filter(etablissement_id=instance.etablissement_id,
+                                                 code_jour__isnull=True):
+                cours = horaires.cours_chevauches(
+                    instance.etablissement_id, [instance.code_jour_id], p.h_debut, p.h_fin,
+                ).filter(type_planning='HEBDO').first()
+                if cours:
+                    raise serializers.ValidationError({'detail': (
+                        f"Sans pause propre au {instance.code_jour.lib_jour}, la pause « {p.libelle} » "
+                        f"de la semaine s'y appliquerait. " + horaires.message_cours(cours))})
+        super().perform_destroy(instance)
+
+
 class PlanningViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
     etablissement_lookups = ('code_cours__etablissement',)
     queryset         = Planning.objects.select_related(
@@ -1752,6 +2082,9 @@ class PlanningViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
         'code_cours__mle_ens', 'code_cours__code_annee',
         'code_jour', 'code_salle').all()
     serializer_class = PlanningSerializer
+    filterset_fields = ['code_cours__code_classe', 'code_cours__mle_ens',
+                        'code_cours__code_annee', 'code_cours__semestre',
+                        'code_jour', 'type_planning', 'type_seance']
 
     @action(detail=False, methods=['get'], url_path='classe/(?P<code_classe>[^/.]+)')
     def par_classe(self, request, code_classe=None):
@@ -1983,6 +2316,8 @@ class SeanceViewSet(EtablissementFilterMixin, SMSBaseViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        # Un compte ENSEIGNANT ne voit / ne remplit que ses propres séances.
+        qs = scope_queryset_to_enseignant(self.request, qs, field='mle_ens')
         code_dep = self.request.query_params.get('code_dep')
         code_sp  = self.request.query_params.get('code_sp')
         if code_dep:
@@ -1993,7 +2328,9 @@ class SeanceViewSet(EtablissementFilterMixin, SMSBaseViewSet):
 
     @action(detail=True, methods=['get'], url_path='presences')
     def presences(self, request, pk=None):
-        absences = Absence.objects.filter(code_seance=pk).select_related('mle_etudiant')
+        seance   = self.get_object()  # contrôle d'accès (école, enseignant)
+        absences = scope_queryset_to_etudiant(
+            request, Absence.objects.filter(code_seance=seance).select_related('mle_etudiant'))
         return Response(AbsenceSerializer(absences, many=True).data)
 
     @action(detail=True, methods=['post'], url_path='saisir-presences')
@@ -2005,10 +2342,16 @@ class SeanceViewSet(EtablissementFilterMixin, SMSBaseViewSet):
         presences = request.data.get('presences', [])
         errors    = []
         count     = 0
+        # Seuls les élèves inscrits dans la classe de la séance peuvent être pointés.
+        inscrits = set(Inscription.objects.filter(code_classe=seance.code_classe_id, code_annee=seance.code_annee_id)
+                       .values_list('mle_etudiant_id', flat=True))
         for item in presences:
             mle = item.get('mle_etudiant')
             if not mle:
                 errors.append({'mle_etudiant': None, 'detail': 'Matricule manquant.'})
+                continue
+            if mle not in inscrits:
+                errors.append({'mle_etudiant': mle, 'detail': "Élève non inscrit dans cette classe."})
                 continue
             try:
                 Absence.objects.update_or_create(
@@ -2017,8 +2360,11 @@ class SeanceViewSet(EtablissementFilterMixin, SMSBaseViewSet):
                     defaults={
                         'present':   item.get('present', False),
                         'signe':     item.get('signe', False),
-                        'motif':     item.get('motif', ''),
-                        'justifiee': item.get('justifiee', False),
+                        'retard_minutes': max(int(item.get('retard_minutes') or 0), 0) if item.get('present') else 0,
+                        # La justification (posée par le surveillant général) n'est modifiée
+                        # que si elle est explicitement transmise : réenregistrer l'appel ne
+                        # l'efface plus.
+                        **{k: item[k] for k in ('motif', 'justifiee') if k in item},
                     }
                 )
                 count += 1
@@ -2054,6 +2400,7 @@ class SeanceViewSet(EtablissementFilterMixin, SMSBaseViewSet):
         return response
 
 class AbsenceViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
+    etudiant_lookup = 'mle_etudiant'
     etablissement_lookups = ('mle_etudiant__etablissement',)
     queryset         = Absence.objects.select_related('code_seance', 'mle_etudiant').all()
     serializer_class = AbsenceSerializer
@@ -2117,6 +2464,7 @@ class ExamenViewSet(EtablissementFilterMixin, SMSBaseViewSet):
         return Response({'generated': count})
 
 class ConvocationViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
+    etudiant_lookup = 'mle_etudiant'
     etablissement_lookups = ('mle_etudiant__etablissement', 'code_examen__etablissement')
     queryset         = Convocation.objects.select_related(
         'mle_etudiant', 'mle_ens', 'code_examen').all()
@@ -2359,6 +2707,7 @@ class RapportStatistiqueViewSet(EtablissementFilterMixin, SMSBaseViewSet):
 
 
 class RapportAssiduiteViewSet(EtablissementFilterMixin, SMSBaseViewSet):
+    interdit_etudiant = True  # données réservées au personnel
     queryset         = RapportAssiduite.objects.select_related(
         'code_annee', 'code_periode', 'code_classe', 'code_sp', 'code_dep', 'code_faculte').all()
     serializer_class = RapportAssiduiteSerializer
@@ -2452,6 +2801,7 @@ class RapportAssiduiteViewSet(EtablissementFilterMixin, SMSBaseViewSet):
 
 # ── Documents avancés ─────────────────────────────────────────────────────────
 class DecisionViewSet(EtablissementFilterMixin, SMSBaseViewSet):
+    etudiant_lookup = 'mle_etudiant'
     queryset         = Decision.objects.select_related(
         'mle_etudiant', 'code_annee', 'code_classe').all()
     serializer_class = DecisionSerializer
@@ -2526,6 +2876,7 @@ class DecisionViewSet(EtablissementFilterMixin, SMSBaseViewSet):
         return response
 
 class DiplomeViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
+    etudiant_lookup = 'mle_etudiant'
     etablissement_lookups = ('mle_etudiant__etablissement',)
     queryset         = Diplome.objects.select_related('mle_etudiant').all()
     serializer_class = DiplomeSerializer
@@ -2533,12 +2884,14 @@ class DiplomeViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
     filterset_fields = ['annee_obtention', 'mention', 'type_diplome']
 
 class CarteEtudiantViewSet(EtablissementFilterMixin, SMSBaseViewSet):
+    etudiant_lookup = 'mle_etudiant'
     queryset         = CarteEtudiant.objects.select_related('mle_etudiant').all()
     serializer_class = CarteEtudiantSerializer
     search_fields    = ['numero_carte', 'mle_etudiant__nom']
     filterset_fields = ['code_annee', 'statut', 'mle_etudiant']
 
 class StageViewSet(EtablissementFilterMixin, SMSBaseViewSet):
+    etudiant_lookup = 'mle_etudiant'
     queryset         = Stage.objects.select_related('mle_etudiant').all()
     serializer_class = StageSerializer
     search_fields    = ['entreprise', 'sujet', 'mle_etudiant__nom']
@@ -2580,6 +2933,7 @@ class StageViewSet(EtablissementFilterMixin, SMSBaseViewSet):
         return response
 
 class LettreAdmissionViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
+    etudiant_lookup = 'mle_etudiant'
     etablissement_lookups = ('mle_etudiant__etablissement',)
     queryset         = LettreAdmission.objects.select_related('mle_etudiant').all()
     serializer_class = LettreAdmissionSerializer
@@ -2587,6 +2941,7 @@ class LettreAdmissionViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
     filterset_fields = ['type_lettre', 'code_annee', 'envoye_par_email']
 
 class BadgeAccesViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
+    etudiant_lookup = 'mle_etudiant'
     etablissement_lookups = ('mle_etudiant__etablissement', 'mle_ens__etablissement')
     queryset         = BadgeAcces.objects.select_related('mle_etudiant', 'mle_ens').all()
     serializer_class = BadgeAccesSerializer
@@ -2594,6 +2949,7 @@ class BadgeAccesViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
     filterset_fields = ['type_porteur', 'statut']
 
 class DocumentGenereViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
+    etudiant_lookup = 'mle_etudiant'
     etablissement_lookups = ('mle_etudiant__etablissement', 'code_classe__etablissement')
     queryset         = DocumentGenere.objects.select_related(
         'mle_etudiant', 'code_classe', 'code_annee').all()

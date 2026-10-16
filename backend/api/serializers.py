@@ -6,6 +6,7 @@ from rest_framework.validators import UniqueValidator
 from django.contrib.auth.hashers import make_password
 from .image_utils import process_profile_photo
 from .utils import check_event_date_bounds
+from . import horaires
 from .models import (
     TypeEtab, Batiment, Salle, Jour, Langue, Module, Pension, Mention,
     TypeEvaluation, Rapport, Annee, Etablissement, Faculte, Departement,
@@ -20,7 +21,8 @@ from .models import (
     Examen, Epreuve, Convocation, RapportStatistique, RapportAssiduite,
     Decision, Diplome, CarteEtudiant, Stage, LettreAdmission,
     BadgeAcces, DocumentGenere, AuditLog,
-    NiveauScolaire, ConfigBulletin, CoefficientMatiere,
+    NiveauScolaire, ConfigBulletin, CoefficientMatiere, ClotureNotes, Appel,
+    PauseHoraire,
 )
 
 
@@ -640,6 +642,17 @@ class FicheNotesDetailSerializer(serializers.ModelSerializer):
         model = FicheNotesDetail
         fields = '__all__'
 
+    def validate(self, data):
+        get = lambda field: data.get(field, getattr(self.instance, field, None))
+        fiche, note = get('code_fiche'), get('note')
+        if get('absent'):
+            data['note'] = None
+        elif note is not None and fiche is not None and not 0 <= float(note) <= float(fiche.bareme):
+            raise serializers.ValidationError({'note': f'La note doit être comprise entre 0 et {fiche.bareme} (barème de la fiche).'})
+        if not get('absent'):
+            data['justifie'] = False
+        return data
+
 class FicheNotesSerializer(serializers.ModelSerializer):
     lib_matiere   = serializers.CharField(source='code_matiere.lib_matiere',      read_only=True)
     lib_classe    = serializers.CharField(source='code_classe.lib_classe',         read_only=True)
@@ -651,9 +664,20 @@ class FicheNotesSerializer(serializers.ModelSerializer):
     class Meta:
         model = FicheNotes
         fields = '__all__'
+        # L'année se déduit de la période ; le statut ne change que par les actions dédiées.
+        extra_kwargs = {'code_annee': {'required': False}, 'statut': {'read_only': True}}
 
     def validate(self, data):
         get = lambda field: data.get(field, getattr(self.instance, field, None))
+        periode = get('code_periode')
+        if not get('code_annee') and periode is not None:
+            data['code_annee'] = periode.code_annee or (
+                periode.periode_parent.code_annee if periode.periode_parent_id else None)
+        if not data.get('code_annee', get('code_annee')):
+            raise serializers.ValidationError({'code_annee': "Année introuvable : la période choisie n'est rattachée à aucune année."})
+        bareme = get('bareme')
+        if bareme is not None and float(bareme) <= 0:
+            raise serializers.ValidationError({'bareme': 'Le barème doit être supérieur à 0.'})
         date_evaluation, annee, periode = get('date_evaluation'), get('code_annee'), get('code_periode')
         erreur = check_event_date_bounds(date_evaluation, annee, periode)
         if erreur:
@@ -738,6 +762,51 @@ class PlanningSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {'code_salle': "Cette salle est déjà occupée sur ce créneau."})
 
+        # Un cours ne chevauche jamais une pause de son école (années non clôturées).
+        if code_cours and h_debut and h_fin and code_cours.code_annee.statut != 'CLOTUREE':
+            pause = horaires.pause_chevauchee(
+                code_cours.etablissement_id,
+                code_jour.pk if (type_planning == 'HEBDO' and code_jour) else None,
+                h_debut, h_fin,
+            )
+            if pause:
+                raise serializers.ValidationError({'h_debut': horaires.message_pause(pause)})
+
+        return data
+
+
+class PauseHoraireSerializer(serializers.ModelSerializer):
+    lib_jour = serializers.CharField(source='code_jour.lib_jour', read_only=True)
+
+    class Meta:
+        model = PauseHoraire
+        fields = '__all__'
+        read_only_fields = ('etablissement',)
+
+    def validate(self, data):
+        from .mixins import trusted_etablissement_header
+        get = lambda field: data.get(field, getattr(self.instance, field, None))
+        h_debut, h_fin, jour = get('h_debut'), get('h_fin'), get('code_jour')
+        if h_debut and h_fin and h_debut >= h_fin:
+            raise serializers.ValidationError({'h_fin': "L'heure de fin doit être après l'heure de début."})
+        etab_id = trusted_etablissement_header(self.context['request'])
+        exclure = self.instance.pk if self.instance else None
+        code_jour = jour.pk if jour else None
+
+        # Pas deux pauses qui se chevauchent sur la même portée (un jour, ou toute la semaine).
+        voisines = PauseHoraire.objects.filter(
+            etablissement_id=etab_id, code_jour_id=code_jour, h_debut__lt=h_fin, h_fin__gt=h_debut,
+        ).exclude(pk=exclure)
+        if voisines.exists():
+            v = voisines.first()
+            raise serializers.ValidationError(
+                {'h_debut': f"Cette pause chevauche « {v.libelle} » ({v.h_debut:%H:%M} – {v.h_fin:%H:%M})."})
+
+        # Pas de pause sur un cours déjà programmé.
+        jours = horaires.jours_ou_la_pause_s_applique(etab_id, code_jour, exclure_pk=exclure)
+        cours = horaires.cours_chevauches(etab_id, jours, h_debut, h_fin).first()
+        if cours:
+            raise serializers.ValidationError({'h_debut': horaires.message_cours(cours)})
         return data
 
 class RapportCoursSerializer(serializers.ModelSerializer):
@@ -926,6 +995,21 @@ class CoefficientMatiereSerializer(serializers.ModelSerializer):
         model  = CoefficientMatiere
         fields = '__all__'
         read_only_fields = ['etablissement']
+
+class ClotureNotesSerializer(serializers.ModelSerializer):
+    lib_classe  = serializers.CharField(source='code_classe.lib_classe',   read_only=True)
+    lib_periode = serializers.CharField(source='code_periode.lib_periode', read_only=True)
+    class Meta:
+        model  = ClotureNotes
+        fields = '__all__'
+        read_only_fields = ['etablissement', 'cloturee_le', 'cloturee_par']
+
+class AppelSerializer(serializers.ModelSerializer):
+    lib_classe = serializers.CharField(source='code_classe.lib_classe', read_only=True)
+    class Meta:
+        model  = Appel
+        fields = '__all__'
+        read_only_fields = ['etablissement', 'fait_par']
 
 class ConfigBulletinSerializer(serializers.ModelSerializer):
     class Meta:

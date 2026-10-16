@@ -18,12 +18,15 @@ const STATUT_COLORS = {
 };
 
 // ── Modale Présences ─────────────────────────────────────────────────────────
+// Tout le monde est présent par défaut : l'enseignant coche les absents et note les retards.
+// La justification des absences relève du surveillant général (page Vie scolaire) : elle
+// n'est pas modifiée ici. L'émargement (« Signé ») ne concerne que le supérieur.
 function PresencesModal({ seance, onClose, toast }) {
   const { t, lang } = useApp();
   const { typeEtab, systeme } = useEtablissement();
   const labels = etabLabels(typeEtab, systeme, lang);
+  const avecEmargement = labels.isSuperieur;
   const [presences, setPresences]   = useState([]);
-  const [etudiants, setEtudiants]   = useState([]);
   const [loading,   setLoading]     = useState(true);
   const [saving,    setSaving]      = useState(false);
 
@@ -32,43 +35,42 @@ function PresencesModal({ seance, onClose, toast }) {
       try {
         const [presRes, etudRes] = await Promise.all([
           api.get(`/api/seances/${seance.code_seance}/presences/`),
-          api.get(`/api/inscriptions/?code_classe=${seance.code_classe}&page_size=100`),
+          // Inscrits de l'année de la séance uniquement.
+          api.get(`/api/inscriptions/?code_classe=${seance.code_classe}&code_annee=${seance.code_annee}&page_size=500`),
         ]);
-        const presData  = presRes.data.results ?? presRes.data;
-        const inscData  = etudRes.data.results ?? etudRes.data;
-        const mles      = inscData.map(i => ({
-          mle: i.mle_etudiant?.mle_etudiant || i.mle_etudiant,
-          nom: i.nom_etudiant || i.mle_etudiant?.nom || i.mle_etudiant,
-        }));
-        const merged = mles.map(m => {
+        const presData = presRes.data.results ?? presRes.data;
+        const vus = new Set();
+        const eleves = (etudRes.data.results ?? etudRes.data)
+          .map(i => ({ mle: i.mle_etudiant?.mle_etudiant || i.mle_etudiant,
+                       nom: `${i.nom_etudiant || ''} ${i.prenom_etudiant || ''}`.trim() || i.mle_etudiant }))
+          .filter(e => !vus.has(e.mle) && vus.add(e.mle));
+        setPresences(eleves.map(m => {
           const p = presData.find(p => (p.mle_etudiant?.mle_etudiant || p.mle_etudiant) === m.mle);
-          return { mle: m.mle, nom: m.nom, present: p?.present ?? false, signe: p?.signe ?? false };
-        });
-        setEtudiants(merged);
-        setPresences(merged);
+          return { mle: m.mle, nom: m.nom, present: p ? p.present : true, signe: p?.signe ?? false,
+                   retard: p?.retard_minutes || 0, justifiee: p?.justifiee ?? false };
+        }));
       } catch { toast.error(t.errors.loading); }
       finally  { setLoading(false); }
     };
     load();
   }, [seance.code_seance]);
 
-  const toggle = (mle, field) => {
-    setPresences(prev => prev.map(p =>
-      p.mle === mle ? { ...p, [field]: !p[field] } : p
-    ));
-  };
+  const maj = (mle, champs) => setPresences(prev => prev.map(p => p.mle === mle ? { ...p, ...champs } : p));
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      await api.post(`/api/seances/${seance.code_seance}/saisir-presences/`, {
+      const res = await api.post(`/api/seances/${seance.code_seance}/saisir-presences/`, {
         presences: presences.map(p => ({
-          mle_etudiant: p.mle, present: p.present, signe: p.signe
-        }))
+          mle_etudiant: p.mle, present: p.present, signe: avecEmargement ? p.signe : false,
+          retard_minutes: p.present ? Number(p.retard) || 0 : 0,
+        })),
       });
-      toast.success(`${presences.filter(p => p.present).length} ${t.common.presences.toLowerCase()}.`);
+      const absents = presences.filter(p => !p.present).length;
+      toast.success(`Appel enregistré : ${absents} absent(s), ${presences.filter(p => p.present && Number(p.retard) > 0).length} retard(s).`);
+      if (res.data.errors?.length) toast.error(`${res.data.errors.length} élève(s) ignoré(s).`);
       onClose();
-    } catch { toast.error(t.errors.saving); }
+    } catch (err) { toast.error(err.response?.data?.detail || t.errors.saving); }
     finally   { setSaving(false); }
   };
 
@@ -76,11 +78,11 @@ function PresencesModal({ seance, onClose, toast }) {
 
   return (
     <div className="sms-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="sms-modal" style={{ maxWidth: 600 }}>
+      <div className="sms-modal" style={{ maxWidth: 640 }}>
         <div className="sms-modal-header">
           <div className="sms-modal-title">
             <i className="fas fa-calendar-check" style={{ marginRight: 8, color: 'var(--green)' }}></i>
-            {t.common.emargement} — {seance.lib_matiere || seance.code_matiere}
+            Appel — {seance.lib_matiere || seance.code_matiere}
           </div>
           <button className="sms-btn-icon" onClick={onClose}><i className="fas fa-times"></i></button>
         </div>
@@ -90,21 +92,11 @@ function PresencesModal({ seance, onClose, toast }) {
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12,
                 padding: '8px 12px', background: 'var(--bg-darkest)', borderRadius: 8 }}>
                 <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                  {seance.date_seance} · {seance.h_debut} – {seance.h_fin}
+                  {seance.date_seance} · {seance.h_debut} – {seance.h_fin} · tous présents par défaut, décochez les absents
                 </span>
                 <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--green)' }}>
                   {nbPresents}/{presences.length} {t.common.present.toLowerCase()}s
                 </span>
-              </div>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-                <button className="sms-btn sms-btn-outline sms-btn-sm"
-                  onClick={() => setPresences(p => p.map(x => ({ ...x, present: true, signe: true })))}>
-                  {t.common.allPresent}
-                </button>
-                <button className="sms-btn sms-btn-outline sms-btn-sm"
-                  onClick={() => setPresences(p => p.map(x => ({ ...x, present: false, signe: false })))}>
-                  {t.common.allAbsent}
-                </button>
               </div>
               <div className="sms-table-wrap">
                 <table className="sms-table" style={{ fontSize: 12 }}>
@@ -112,27 +104,36 @@ function PresencesModal({ seance, onClose, toast }) {
                     <tr>
                       <th>{labels.studentLabel}</th>
                       <th style={{ textAlign: 'center', width: 80 }}>{t.common.present}</th>
-                      <th style={{ textAlign: 'center', width: 80 }}>{t.common.signed}</th>
+                      <th style={{ textAlign: 'center', width: 110 }}>Retard (min)</th>
+                      {avecEmargement && <th style={{ textAlign: 'center', width: 80 }}>{t.common.signed}</th>}
                     </tr>
                   </thead>
                   <tbody>
                     {presences.map(p => (
-                      <tr key={p.mle}>
+                      <tr key={p.mle} style={{ background: p.present ? undefined : 'rgba(239,83,80,.08)' }}>
                         <td>
                           <span style={{ fontSize: 11, color: 'var(--text-muted)', marginRight: 6 }}>{p.mle}</span>
                           <strong>{p.nom}</strong>
+                          {!p.present && p.justifiee && <span className="sms-badge badge-secondary" style={{ marginLeft: 6 }}>justifiée</span>}
                         </td>
                         <td style={{ textAlign: 'center' }}>
                           <input type="checkbox" checked={p.present}
-                            onChange={() => toggle(p.mle, 'present')}
+                            onChange={e => maj(p.mle, { present: e.target.checked, retard: e.target.checked ? p.retard : 0 })}
                             style={{ accentColor: 'var(--green)', width: 16, height: 16, cursor: 'pointer' }} />
                         </td>
                         <td style={{ textAlign: 'center' }}>
-                          <input type="checkbox" checked={p.signe}
-                            onChange={() => toggle(p.mle, 'signe')}
-                            disabled={!p.present}
-                            style={{ accentColor: 'var(--green)', width: 16, height: 16, cursor: 'pointer' }} />
+                          <input type="number" min="0" max="240" step="5" value={p.retard || ''} disabled={!p.present}
+                            onChange={e => maj(p.mle, { retard: e.target.value })} placeholder="0"
+                            style={{ width: 70, textAlign: 'center', padding: '4px 6px', background: 'var(--bg-darkest)',
+                              border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', opacity: p.present ? 1 : 0.4 }} />
                         </td>
+                        {avecEmargement && (
+                          <td style={{ textAlign: 'center' }}>
+                            <input type="checkbox" checked={p.signe} onChange={e => maj(p.mle, { signe: e.target.checked })}
+                              disabled={!p.present}
+                              style={{ accentColor: 'var(--green)', width: 16, height: 16, cursor: 'pointer' }} />
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>

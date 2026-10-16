@@ -66,6 +66,7 @@ router.register(r'fiches-notes-detail', views.FicheNotesDetailViewSet, basename=
 
 # ── Planning, Séances & Absences ──────────────────────────────────────────────
 router.register(r'planning',          views.PlanningViewSet,         basename='planning')
+router.register(r'pauses',            views.PauseHoraireViewSet,     basename='pause')
 router.register(r'rapports-cours',    views.RapportCoursViewSet,     basename='rapport-cours')
 router.register(r'seances',           views.SeanceViewSet,           basename='seance')
 router.register(r'absences',          views.AbsenceViewSet,          basename='absence')
@@ -92,6 +93,9 @@ router.register(r'audit',             views.AuditLogViewSet,         basename='a
 # ── Multi-établissement ───────────────────────────────────────────────────────
 router.register(r'niveaux-scolaires', views.NiveauScolaireViewSet,   basename='niveau-scolaire')
 router.register(r'coefficients',      views.CoefficientMatiereViewSet, basename='coefficient')
+router.register(r'clotures-notes',    views.ClotureNotesViewSet,       basename='cloture-notes')
+router.register(r'appels',            views.AppelViewSet,              basename='appel')
+router.register(r'vie-scolaire',      views.VieScolaireViewSet,        basename='vie-scolaire')
 router.register(r'config-bulletin',   views.ConfigBulletinViewSet,   basename='config-bulletin')
 
 # ── URL patterns ──────────────────────────────────────────────────────────────

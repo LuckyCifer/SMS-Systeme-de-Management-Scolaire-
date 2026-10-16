@@ -173,16 +173,21 @@ function Form({ item, onClose, onSave, labels }) {
     domicile:     item?.domicile     || '',
     nom_tuteur:   item?.nom_tuteur   || '',
     adresse:      item?.adresse      || '',
+    utilisateur:  fkVal(item?.utilisateur, 'login') || '',
   });
+  // Comptes de rôle Élève, pour relier ce dossier à son compte de connexion.
+  const [comptes, setComptes] = useState([]);
 
   // Charge les listes au montage
   useEffect(() => {
     Promise.all([
       api.get('/api/departements/?page_size=100'),
       api.get('/api/specialites/?page_size=200'),
-    ]).then(([depRes, spRes]) => {
+      api.get('/api/utilisateurs/?page_size=500').catch(() => ({ data: [] })),
+    ]).then(([depRes, spRes, userRes]) => {
       setDepartements(depRes.data.results ?? depRes.data);
       setSpecialites(spRes.data.results  ?? spRes.data);
+      setComptes((userRes.data.results ?? userRes.data ?? []).filter(u => u.role === 'ETUDIANT'));
     }).catch(() => {
       toast.error(t.errors.loading);
     }).finally(() => {
@@ -233,7 +238,7 @@ function Form({ item, onClose, onSave, labels }) {
   };
 
   return (
-    <form onSubmit={e => { e.preventDefault(); if (!validateAll(f)) return; onSave({ ...f, _photoFile: photoFile }); }}>
+    <form onSubmit={e => { e.preventDefault(); if (!validateAll(f)) return; onSave({ ...f, utilisateur: f.utilisateur || null, _photoFile: photoFile }); }}>
       {/* Photo de profil — centré en haut du formulaire */}
       <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
         <PhotoProfil
@@ -277,6 +282,10 @@ function Form({ item, onClose, onSave, labels }) {
         <FormField label={t.fields.email}    name="email"    type="email" value={f.email}    onChange={ch} onBlur={bl} placeholder={PH.email} error={errors.email} />
         <FormField label={t.fields.domicile} name="domicile" value={f.domicile} onChange={ch} placeholder={PH.domicile} help="Adresse du logement actuel de l'étudiant (différente de l'adresse d'origine)" />
       </div>
+      <FormField label="Compte de connexion" name="utilisateur" type="select"
+        value={f.utilisateur} onChange={ch}
+        options={comptes.map(c => ({ value: c.login, label: c.nom_user ? `${c.login} — ${c.nom_user}` : c.login }))}
+        help="Compte utilisateur (rôle Élève) associé : l'élève ne verra que ses propres notes, absences et paiements." />
       <div className="sms-form-row">
         <FormField label={t.fields.pere}   name="nom_pere"   value={f.nom_pere}   onChange={ch} />
         <FormField label={t.fields.mere}   name="nom_mere"   value={f.nom_mere}   onChange={ch} />

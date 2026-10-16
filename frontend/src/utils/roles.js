@@ -35,14 +35,14 @@ export const ROLE_PERMISSIONS = {
   },
   SCOLARITE: {
     pages:   ['dashboard', 'students', 'classes', 'cours', 'inscription', 'evaluation', 'grades',
-              'absences', 'bulletins', 'importCsv', 'personnel', 'epreuves', 'coefficients'],
+              'absences', 'bulletins', 'importCsv', 'personnel', 'epreuves', 'coefficients', 'vieScolaire'],
     canEdit: true,
     canDelete: true,
     canCreate: true,
     canSwitchEtab: false,
   },
   ENSEIGNANT: {
-    pages:   ['dashboard', 'classes', 'evaluation', 'grades', 'cours', 'absences', 'epreuves'],
+    pages:   ['dashboard', 'classes', 'evaluation', 'grades', 'cours', 'absences', 'epreuves', 'vieScolaire'],
     canEdit: true,
     canDelete: false,
     canCreate: true,
@@ -63,7 +63,7 @@ export const ROLE_PERMISSIONS = {
     canSwitchEtab: false,
   },
   DIRECTION: {
-    pages:   ['dashboard', 'reports', 'statistics', 'absences', 'bulletins', 'personnel'],
+    pages:   ['dashboard', 'reports', 'statistics', 'absences', 'bulletins', 'personnel', 'vieScolaire'],
     canEdit: false,
     canDelete: false,
     canCreate: false,
@@ -74,7 +74,7 @@ export const ROLE_PERMISSIONS = {
   // d'administration système).
   CENSEUR: {
     pages:   ['dashboard', 'students', 'teachers', 'classes', 'cours', 'evaluation',
-              'grades', 'examens', 'planning', 'absences', 'bulletins', 'coefficients'],
+              'grades', 'examens', 'planning', 'absences', 'bulletins', 'coefficients', 'vieScolaire'],
     canEdit: true,
     canDelete: false,
     canCreate: true,
@@ -82,7 +82,7 @@ export const ROLE_PERMISSIONS = {
   },
   // Surveillant Général : discipline, ponctualité, vie scolaire quotidienne.
   SURVEILLANT_GENERAL: {
-    pages:   ['dashboard', 'students', 'classes', 'absences'],
+    pages:   ['dashboard', 'students', 'classes', 'absences', 'vieScolaire'],
     canEdit: true,
     canDelete: false,
     canCreate: true,

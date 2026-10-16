@@ -55,6 +55,8 @@ Projet SMS/
 │   │   ├── mixins.py          # Isolation par établissement (voir §7)
 │   │   ├── permissions.py     # Droits d'écriture par rôle (miroir de roles.js)
 │   │   ├── notes.py           # SEUL endroit des calculs de notes (voir §8)
+│   │   ├── vie_scolaire.py    # Appel journalier, absences du jour, alertes (voir §8.3)
+│   │   ├── horaires.py        # Pauses de l'emploi du temps : aucun cours ne les chevauche (§8.4)
 │   │   ├── deduction_classes.py # Déduction niveau/série depuis le libellé d'une classe
 │   │   ├── utils.py           # get_client_ip, log_action, moyenne_ponderee
 │   │   ├── tests/             # Tests (package) — PAS de fichier tests.py à côté
@@ -120,6 +122,7 @@ Projet SMS/
 | `Evaluation` | École | Notes /20 ; au primaire, `appreciation` (A/ECA/NA) déduite automatiquement |
 | `FicheNotes` / `FicheNotesDetail` | École / (fiche) | Fiches de notes des enseignants |
 | `Planning`, `Seance`, `Absence` | (cours) / École / (élève) | Emploi du temps, séances, absences |
+| `PauseHoraire` | École | Pauses de l'emploi du temps (récréations, déjeuner) ; voir §8.4 |
 | `RapportCours`, `Qualification` | (classe) / (enseignant) | Rapports de cours, qualifications |
 
 ### 4.5 Examens, décisions et documents
@@ -149,9 +152,11 @@ Projet SMS/
 - **Pages visibles** : `frontend/src/utils/roles.js` (`ROLE_PERMISSIONS`). ADMIN et SUPER_ADMIN voient tout ; la page `coefficients` est ouverte à SCOLARITE et CENSEUR.
 - **Écriture côté serveur** : `backend/api/permissions.py` (`ROLE_WRITE_PERMISSIONS`). Les deux fichiers doivent rester synchronisés.
 - **Règles spécifiques** :
-  - générer les décisions et modifier les coefficients : SUPER_ADMIN, ADMIN, SCOLARITE, CENSEUR ;
+  - générer les décisions, modifier les coefficients, valider / rouvrir une fiche de notes, clôturer / rouvrir une période : SUPER_ADMIN, ADMIN, SCOLARITE, CENSEUR (`ROLES_GESTION_NOTES` dans views.py) ;
   - journal d'audit : ADMIN, SUPER_ADMIN ;
-  - un ENSEIGNANT ne voit que ses propres matières et classes (`scope_queryset_to_enseignant*`).
+  - un ENSEIGNANT ne voit que ses propres matières, classes, fiches et séances (`scope_queryset_to_enseignant*`) ; lien compte ↔ fiche : `Enseignant.utilisateur` ;
+  - un ÉTUDIANT ne voit que ses propres données : lien compte ↔ fiche `Etudiant.utilisateur` (champ « Compte de connexion » de la fiche élève ; à défaut, login = matricule). Dans `SMSBaseViewSet`, `etudiant_lookup` donne le chemin vers l'élève et `interdit_etudiant` refuse les données du personnel (salaires, personnel, fiches de notes…). Un compte élève non relié ne voit rien.
+- **Actions de détail** (`@action(detail=True)`) : toujours commencer par `self.get_object()`, qui applique école et périmètre. Un filtre direct sur `pk` contourne l'isolation.
 
 ---
 
@@ -201,6 +206,29 @@ Projet SMS/
   - Supérieur : une matière est validée à partir de 10 ; la compensation s'applique sauf si une matière est sous sa `note_elim`.
   - Les saisies du jury sont conservées.
 - **Bulletins PDF** : `pdfService.generateBulletin(etudiant, resultat, periode, etab)`, appelé par les pages Notes, Bulletins et Mon dossier.
+
+### 8.1 Fiches de notes (saisie des enseignants)
+- **Circuit** : BROUILLON (l'enseignant saisit) → `soumettre/` → SOUMIS → `valider/` (censeur / administration) → VALIDE, avec report immédiat des notes dans `Evaluation` (`notes.importer_fiche`). `rouvrir/` ramène la fiche en brouillon pour correction. `importer/` est un ancien alias de `valider/`.
+- **Saisie** : `POST /api/fiches-notes/<id>/saisir/` enregistre toute la fiche en une transaction (tout ou rien) ; seuls les élèves inscrits dans la classe sont acceptés.
+- **Barème** : la note est saisie sur le barème de la fiche et convertie sur 20 au report (8/10 → 16/20).
+- **Absences** : un absent non justifié reçoit 0. Un absent justifié donne une évaluation `dispense=True`, sans note, neutralisée dans la moyenne de l'élève (la matière sort de son total si c'est sa seule évaluation).
+- **Année** : déduite de la période ; plus de saisie libre.
+
+### 8.2 Clôture des notes (conseil de classe)
+- `ClotureNotes` (classe × période) : `POST /api/clotures-notes/` clôture, `DELETE` rouvre ; bouton dans la page Notes. La clôture d'un trimestre couvre ses séquences.
+- Une période close refuse toute création, modification ou suppression (y compris en masse) d'évaluation, toute saisie de fiche et tout report (`notes.verifier_periode_ouverte`).
+- Chaque modification de note est tracée dans l'audit avec l'ancienne et la nouvelle valeur.
+
+### 8.3 Vie scolaire (`api/vie_scolaire.py`, page `/vie-scolaire`)
+- **Appel par séance** (`/api/seances/<id>/saisir-presences/`) : tout le monde présent par défaut ; retards en minutes (`Absence.retard_minutes`) ; l'émargement (« Signé ») n'est affiché qu'au supérieur ; la justification n'est pas modifiée par un nouvel appel.
+- **Appel journalier** (`Appel`, `AppelLigne`) : par classe, matin ou après-midi, statut PRÉSENT / ABSENT / RETARD. API `/api/appels/feuille/` et `enregistrer/`. Un enseignant ne fait l'appel que dans ses classes.
+- **Surveillant général** : `/api/vie-scolaire/jour/` (absences et retards du jour, deux sources), `justifier/`, `alertes/` (heures non justifiées de l'année ≥ seuil ; une demi-journée d'appel = 4 h par défaut).
+
+### 8.4 Emploi du temps et pauses (`api/horaires.py`, page `/planning`)
+- Le planning affiché est filtré par classe, trimestre ou semestre, **et par l'année active du bandeau**.
+- Les pauses (`PauseHoraire`, API `/api/pauses/`) sont **en base, par école**, et non plus dans le navigateur. Une pause sans jour vaut pour toute la semaine ; les pauses propres à un jour remplacent celles de la semaine ce jour-là.
+- **Aucun cours ne chevauche une pause**, contrôle fait par le serveur dans les deux sens : un créneau posé sur une pause est refusé (`PlanningSerializer`), et une pause posée sur un cours aussi (`PauseHoraireSerializer`, y compris la suppression de la dernière pause d'un jour). Seules les années non clôturées comptent.
+- Écriture des pauses : SUPER_ADMIN, ADMIN, SCOLARITE, CENSEUR.
 
 ---
 
@@ -260,8 +288,8 @@ docker compose stop             # arrête sans rien perdre
   - grilles de coefficients ;
   - génération des séquences du secondaire ;
   - niveaux de maternelle, absents du référentiel `NiveauScolaire`.
-- [ ] À vérifier : un compte ETUDIANT peut-il lire les notes des autres élèves de son école via l'API ?
-- [ ] Commiter le travail en cours (non commité au 16/10/2026).
+- [ ] Relier chaque compte ÉLÈVE à sa fiche (champ « Compte de connexion ») : aucun ne l'est au 16/10/2026, ces comptes ne voient donc rien.
+- [ ] Informer les parents des absences (non traité).
 - [ ] Préparer le déploiement : compose de production (gunicorn, build Vite statique, `collectstatic`, secrets, `DEBUG=False`).
 
 ---

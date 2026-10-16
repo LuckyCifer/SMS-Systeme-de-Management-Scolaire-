@@ -69,6 +69,69 @@ def type_etab_classe(code_classe_id, etablissement_id=None):
     return None
 
 
+# ── Fiches de notes ───────────────────────────────────────────────────────────
+def periode_close(code_classe, code_periode):
+    """Vrai si la période — ou le trimestre qui contient cette séquence — est close pour la classe."""
+    from .models import ClotureNotes, Periode
+    if not code_classe or not code_periode:
+        return False
+    ids = [code_periode]
+    parent = Periode.objects.filter(pk=code_periode).values_list('periode_parent', flat=True).first()
+    if parent:
+        ids.append(parent)
+    return ClotureNotes.objects.filter(code_classe=code_classe, code_periode__in=ids).exists()
+
+
+def verifier_periode_ouverte(code_classe, code_periode):
+    """Lève PermissionDenied si les notes de cette classe sur cette période sont verrouillées."""
+    from rest_framework.exceptions import PermissionDenied
+    if periode_close(code_classe, code_periode):
+        raise PermissionDenied("Cette période est clôturée pour cette classe (conseil de classe tenu) : "
+                               "les notes ne peuvent plus être modifiées. Demandez sa réouverture "
+                               "au censeur ou à l'administration.")
+
+
+def note_sur_20(note, bareme):
+    """Convertit une note saisie sur `bareme` en note sur 20 (ex : 8/10 → 16/20)."""
+    if note is None:
+        return None
+    bareme = float(bareme or 20)
+    return round(float(note) * 20 / bareme, 2)
+
+
+def importer_fiche(fiche):
+    """
+    Reporte les notes d'une fiche dans Evaluation :
+      - note saisie sur le barème de la fiche → convertie sur 20 ;
+      - absent non justifié → 0 ;
+      - absent justifié → évaluation « dispensée », neutralisée dans la moyenne.
+    Une ligne sans rien de saisi est ignorée. Retourne le nombre d'évaluations écrites.
+    """
+    from .models import Evaluation, FicheNotesDetail
+    n = 0
+    for d in FicheNotesDetail.objects.filter(code_fiche=fiche):
+        if d.absent:
+            valeurs = {'note': None, 'dispense': True, 'obs_eval': 'Absence justifiée'} if d.justifie \
+                else {'note': 0, 'dispense': False, 'obs_eval': 'Absent'}
+        elif d.note is not None:
+            valeurs = {'note': note_sur_20(d.note, fiche.bareme), 'dispense': False,
+                       'obs_eval': (d.observation or '')[:45] or None}
+        elif d.appreciation:
+            valeurs = {'note': None, 'appreciation': d.appreciation, 'dispense': False,
+                       'obs_eval': (d.observation or '')[:45] or None}
+        else:
+            continue
+        Evaluation.objects.update_or_create(
+            mle_etudiant=d.mle_etudiant, code_matiere=fiche.code_matiere,
+            code_classe=fiche.code_classe, code_periode=fiche.code_periode,
+            code_type_eval=fiche.code_type_eval,
+            defaults={**valeurs, 'date_eval': fiche.date_evaluation,
+                      'etablissement': fiche.etablissement, 'code_annee': fiche.code_annee},
+        )
+        n += 1
+    return n
+
+
 # ── Séries et grille des coefficients ─────────────────────────────────────────
 SERIES_LANGUES      = ['ALLEMAND', 'ESPAGNOL', 'LATIN', 'CHINOIS']   # 4ème / 3ème
 SERIES_FRANCOPHONES = ['A', 'C', 'D', 'E', 'TI']
@@ -216,7 +279,10 @@ def calculer_resultats(evaluations, code_classe, code_periode=None, code_annee=N
             'lib_matiere': e.code_matiere.lib_matiere,
             'periodes':    defaultdict(list),
             'evaluations': [],
+            'dispense':    False,
         })
+        if e.dispense:
+            mat['dispense'] = True
         mat['periodes'][e.code_periode_id].append(e)
         mat['evaluations'].append(e)
         if e.note is not None:
@@ -227,12 +293,16 @@ def calculer_resultats(evaluations, code_classe, code_periode=None, code_annee=N
 
     resultats = []
     for data in par_etudiant.values():
-        matieres, moy_par_matiere = [], {}
+        matieres, moy_par_matiere, neutralisees = [], {}, set()
         for code_mat, mat in data['matieres'].items():
             valeurs = [_moyenne_periode(mat['periodes'], r, enfants) for r in racines]
             valeurs = [v for v in valeurs if v is not None]
             moy = round(sum(valeurs) / len(valeurs), 2) if valeurs else None
             moy_par_matiere[code_mat] = moy
+            # Absence justifiée sans aucune note dans la matière : la matière est retirée
+            # de la moyenne de CET élève (ni 0, ni poids), au lieu de compter 0.
+            if moy is None and mat['dispense']:
+                neutralisees.add(code_mat)
             if primaire and moy is not None:
                 appreciation = appreciation_depuis_note(moy)
             else:
@@ -248,10 +318,12 @@ def calculer_resultats(evaluations, code_classe, code_periode=None, code_annee=N
                 'poids_defaut': code_mat in sans_poids,
                 'nb_evals':     len(mat['evaluations']),
                 'appreciation': appreciation,
+                'dispense':     code_mat in neutralisees,
             })
 
-        total_poids  = sum(poids[m] for m in matieres_notees)
-        total_points = sum((moy_par_matiere.get(m) or 0) * poids[m] for m in matieres_notees)
+        comptees     = matieres_notees - neutralisees
+        total_poids  = sum(poids[m] for m in comptees)
+        total_points = sum((moy_par_matiere.get(m) or 0) * poids[m] for m in comptees)
         moyenne_gen  = round(total_points / total_poids, 2) if total_poids else None
         matieres.sort(key=lambda m: m['lib_matiere'])
         resultats.append({

@@ -68,6 +68,7 @@ export default function Sidebar({ collapsed }) {
         { to:'/factures',     page:'payments',    label:t.nav.factures,     icon:'fas fa-file-invoice' },
         { to:'/bareme',       page:'payments',    label:t.nav.bareme,       icon:'fas fa-coins' },
         { to:'/planning',     page:'cours',       label:t.nav.planning,     icon:'fas fa-calendar-alt' },
+        { to:'/vie-scolaire', page:'vieScolaire', label:'Vie scolaire',     icon:'fas fa-user-check' },
         { to:'/absences',     page:'absences',    label:t.nav.absences,     icon:'fas fa-user-times' },
         { to:'/bulletins',    page:'bulletins',   label:t.nav.bulletins,    icon:'fas fa-file-pdf' },
         { to:'/mon-dossier',  page:'monDossier',  label:t.nav.monDossier,   icon:'fas fa-id-badge' },

@@ -30,11 +30,12 @@ function Form({ item, onClose, onSave }) {
     code_periode:   item?.code_periode?.code_periode || item?.code_periode || '',
     code_type_eval: item?.code_type_eval?.code_type_eval || item?.code_type_eval || '',
     date_eval: item?.date_eval?.slice(0,10) || new Date().toISOString().slice(0,10),
-    note: item?.note || '', obs_eval: item?.obs_eval || '',
+    note: item?.note ?? '', obs_eval: item?.obs_eval || '',
+    dispense: item?.dispense || false,
   });
   const ch = e => setF({ ...f, [e.target.name]: e.target.value });
   return (
-    <form onSubmit={e => { e.preventDefault(); onSave(f); }}>
+    <form onSubmit={e => { e.preventDefault(); onSave({ ...f, note: f.dispense || f.note === '' ? null : f.note }); }}>
       <div className="sms-form-row">
         <FormField label={lang === 'en' ? `${labels.studentLabel} ID` : `Matricule ${labels.studentLabel.toLowerCase()}`}
           name="mle_etudiant"   value={f.mle_etudiant}   onChange={ch} required />
@@ -47,9 +48,14 @@ function Form({ item, onClose, onSave }) {
         <FormField label={t.fields.date}         name="date_eval"      type="date" value={f.date_eval} onChange={ch} required help="Format : JJ/MM/AAAA" />
       </div>
       <div className="sms-form-row">
-        <FormField label={t.fields.note}  name="note"     type="number" value={f.note}     onChange={ch} required placeholder="0–20" />
+        <FormField label={t.fields.note}  name="note"     type="number" value={f.dispense ? '' : f.note} onChange={ch}
+          required={!f.dispense} disabled={f.dispense} placeholder="0–20" />
         <FormField label={t.fields.obs}   name="obs_eval"               value={f.obs_eval} onChange={ch} />
       </div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 6 }}>
+        <input type="checkbox" checked={f.dispense} onChange={e => setF({ ...f, dispense: e.target.checked })} />
+        Absent justifié — évaluation neutralisée dans la moyenne (sinon, un absent non justifié reçoit 0)
+      </label>
       <div className="sms-modal-footer" style={{ padding:'14px 0 0', border:'none' }}>
         <button type="button" className="sms-btn sms-btn-outline sms-btn-sm" onClick={onClose}>{t.common.cancel}</button>
         <button type="submit"  className="sms-btn sms-btn-primary sms-btn-sm"><i className="fas fa-save"></i> {t.common.save}</button>
@@ -117,6 +123,7 @@ export default function Evaluation() {
     { key:'date',  label: t.fields.date,     render: r => r.date_eval?.slice(0,10) || '—' },
     // Primaire : la note /20 est accompagnée de son appréciation A/ECA/NA.
     { key:'note',  label: t.fields.note, searchValue: r => `${r.note ?? ''} ${r.appreciation ?? ''}`, render: r => <>
+        {r.dispense && <span className="sms-badge badge-secondary" title="Absence justifiée : neutralisée">ABS. J</span>}
         {r.note !== null && r.note !== undefined && <span className={`sms-badge ${noteColor(r.note)}`}>{r.note}/20</span>}
         {r.appreciation && <> <span className={`sms-badge ${APPRECIATION_COLOR[r.appreciation] || 'badge-secondary'}`}>{r.appreciation}</span></>}
       </>

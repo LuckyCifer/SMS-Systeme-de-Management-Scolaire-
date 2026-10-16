@@ -14,7 +14,11 @@ import { usePdfPreview } from '../context/PdfPreviewContext';
 import { useApi } from '../hooks/useApi';
 import { useEtablissement } from '../hooks/useEtablissement';
 import { etabLabels } from '../utils/etabLabels';
-import { evaluationService, classeService, periodeService } from '../services/endpoints';
+import { evaluationService, classeService, periodeService, clotureNotesService } from '../services/endpoints';
+import { getUser } from '../utils/Auth';
+
+// Clôturer / rouvrir une période : censeur et administration (miroir du backend).
+const ROLES_GESTION_NOTES = ['SUPER_ADMIN', 'ADMIN', 'SCOLARITE', 'CENSEUR'];
 import { LoadingState, ErrorState } from '../components/ApiState';
 import { generateBulletin } from '../services/pdfService';
 import SearchableSelect from '../components/SearchableSelect';
@@ -92,7 +96,9 @@ function ReleveParClasse({ resultats, isPrimaire, poidsLabel }) {
                       <span style={{ color: c.moyenne >= 10 ? 'var(--green)' : '#ef5350', fontWeight: 600 }}>
                         {c.moyenne.toFixed(2)}
                       </span>
-                    ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                    ) : c?.dispense
+                      ? <span style={{ color: 'var(--text-muted)', fontSize: 10 }} title="Absence justifiée : matière neutralisée">ABS. J</span>
+                      : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                     {isPrimaire && c?.appreciation && <> <AppreciationBadge value={c.appreciation} /></>}
                   </td>
                 );
@@ -151,6 +157,29 @@ export default function Grades() {
     [classeId, periodeChoice]), [classeId, periodeChoice]
   );
   const resultats = moyennesData || [];
+
+  // Clôture : uniquement pour une période précise (pas l'année complète).
+  const codePeriode = choix?.code_periode;
+  const peutCloturer = ROLES_GESTION_NOTES.includes(getUser()?.role);
+  const { data: clotures, reload: reloadClotures } = useApi(
+    useCallback(() => (classeId && codePeriode)
+      ? clotureNotesService.list({ code_classe: classeId, code_periode: codePeriode })
+      : Promise.resolve({ data: [] }), [classeId, codePeriode]), [classeId, codePeriode]);
+  const cloture = (clotures || [])[0] || null;
+  const basculerCloture = async () => {
+    const question = cloture
+      ? 'Rouvrir cette période ? Les notes de la classe redeviendront modifiables.'
+      : 'Clôturer cette période pour la classe (conseil de classe tenu) ? Plus aucune note ne pourra être modifiée sans réouverture.';
+    if (!window.confirm(question)) return;
+    try {
+      if (cloture) await clotureNotesService.delete(cloture.id);
+      else await clotureNotesService.create({ code_classe: classeId, code_periode: codePeriode });
+      toast.success(cloture ? 'Période rouverte.' : 'Période clôturée.');
+      reloadClotures();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || err.response?.data?.error || t.errors.saving);
+    }
+  };
 
   const filtered = useMemo(() => resultats.filter(r =>
     r.nom_etudiant.toLowerCase().includes(search.toLowerCase()) ||
@@ -251,6 +280,20 @@ export default function Grades() {
             placeholder="— Période ou année complète —"
           />
         </div>
+        {classeId && codePeriode && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 6 }}>
+            {cloture
+              ? <span className="sms-badge badge-secondary" title={`Clôturée par ${cloture.cloturee_par} le ${cloture.cloturee_le?.slice(0, 10)}`}>
+                  <i className="fas fa-lock"></i> Période clôturée
+                </span>
+              : <span className="sms-badge badge-success"><i className="fas fa-lock-open"></i> Période ouverte</span>}
+            {peutCloturer && (
+              <button className="sms-btn sms-btn-outline sms-btn-sm" onClick={basculerCloture}>
+                <i className={cloture ? 'fas fa-unlock' : 'fas fa-lock'}></i> {cloture ? 'Rouvrir' : 'Clôturer la période'}
+              </button>
+            )}
+          </div>
+        )}
         {resultats.length > 0 && (
           <span style={{ fontSize: 12, color: 'var(--text-muted)', paddingBottom: 8 }}>
             {resultats[0].effectif} {labels.studentLabel.toLowerCase()}(s) classé(s)

@@ -49,9 +49,11 @@ export const periodeOptions = (periodes = []) => {
   annees.forEach(code => {
     options.push({ value: `annee:${code}`, label: `Année complète ${code}` });
     periodes.filter(p => p.code_annee === code && !p.periode_parent).sort(byDate).forEach(racine => {
-      options.push({ value: String(racine.code_periode), label: racine.lib_periode });
+      // L'année figure dans chaque libellé : les mêmes trimestres et séquences existent
+      // chaque année, et le sélecteur (avec recherche) ne montre pas le regroupement.
+      options.push({ value: String(racine.code_periode), label: `${racine.lib_periode} — ${code}` });
       periodes.filter(p => p.periode_parent === racine.code_periode).sort(byDate).forEach(seq => {
-        options.push({ value: String(seq.code_periode), label: `↳ ${seq.lib_periode} (${racine.lib_periode})` });
+        options.push({ value: String(seq.code_periode), label: `↳ ${seq.lib_periode} (${racine.lib_periode} — ${code})` });
       });
     });
   });

@@ -117,11 +117,16 @@ export const rapportFinancierService = crud('/api/rapports-financiers');
 // ── Fiches de notes ───────────────────────────────────────────────────────────
 export const ficheNotesService = {
   ...crud('/api/fiches-notes'),
-  valider:  (id) => api.post(`/api/fiches-notes/${id}/valider/`),
-  importer: (id) => api.post(`/api/fiches-notes/${id}/importer/`),
+  // Circuit : saisie (brouillon) → soumettre (enseignant) → valider (censeur : notes reportées)
+  saisir:    (id, notes) => api.post(`/api/fiches-notes/${id}/saisir/`, { notes }),
+  soumettre: (id) => api.post(`/api/fiches-notes/${id}/soumettre/`),
+  valider:   (id) => api.post(`/api/fiches-notes/${id}/valider/`),
+  rouvrir:   (id) => api.post(`/api/fiches-notes/${id}/rouvrir/`),
   details:  (id) => api.get(`/api/fiches-notes-detail/?code_fiche=${id}`),
 };
 export const ficheNotesDetailService = crud('/api/fiches-notes-detail');
+// Clôture des notes d'une classe pour une période (après le conseil de classe).
+export const clotureNotesService = crud('/api/clotures-notes');
 
 // ── Séances & Absences ────────────────────────────────────────────────────────
 export const seanceService = {
@@ -132,6 +137,8 @@ export const seanceService = {
 export const absenceService = crud('/api/absences');
 
 // ── Planning ──────────────────────────────────────────────────────────────────
+// Pauses de l'emploi du temps de l'école connectée (aucun cours ne peut les chevaucher).
+export const pauseService = crud('/api/pauses');
 export const planningService = {
   ...crud('/api/planning'),
   parClasse:      (code) => api.get(`/api/planning/classe/${code}/`),
