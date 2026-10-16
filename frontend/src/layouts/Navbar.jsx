@@ -2,7 +2,8 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { logout, getUser } from '../utils/Auth';
 import { useApp } from '../context/AppContext';
-import { useEtablissement } from '../hooks/useEtablissement';
+import { useEtablissement, connectToEtab } from '../hooks/useEtablissement';
+import { etablissementService } from '../services/endpoints';
 import Breadcrumb from '../components/Breadcrumb';
 import NotificationPanel from '../components/NotificationPanel';
 
@@ -22,44 +23,49 @@ export default function Navbar({ collapsed, onToggle }) {
   const {
     theme, toggleTheme, lang, toggleLang, t,
     anneeActive, setAnneeActive, annees,
-    activeTypeEtab, setActiveTypeEtab,
   } = useApp();
   const user   = getUser();
   const isDark = theme === 'dark';
   const initials = (user?.nom_user || user?.login || 'AD').slice(0, 2).toUpperCase();
   const isSuperAdmin = user?.role === 'SUPER_ADMIN';
 
-  // ── Établissement actif (pour dériver le type en temps réel) ─────────────
-  const { etab, isPinned } = useEtablissement();
-  // Quand un étab est explicitement épinglé, son type prime sur le filtre manuel
-  const effectiveType = (isPinned && etab?.type_etab) ? etab.type_etab : activeTypeEtab;
+  // ── École connectée : une seule à la fois ; son type fixe libellés et pages ──
+  const { etab } = useEtablissement();
+  const typeOption = getTypeOption(etab?.type_etab);
 
-  // ── État du dropdown type ─────────────────────────────────────────────────
-  const [typeOpen, setTypeOpen] = useState(false);
+  // ── Sélecteur d'école (SUPER_ADMIN) ───────────────────────────────────────
+  const [ecoleOpen, setEcoleOpen] = useState(false);
+  const [ecoles,    setEcoles]    = useState(null);
+  const [recherche, setRecherche] = useState('');
   const dropRef = useRef(null);
 
-  // Fermer le dropdown si clic extérieur
   useEffect(() => {
-    if (!typeOpen) return;
+    if (!ecoleOpen) return;
+    if (ecoles === null) {
+      etablissementService.list({ page_size: 200 })
+        .then(res => setEcoles(res.data.results ?? res.data ?? []))
+        .catch(() => setEcoles([]));
+    }
     const handler = (e) => {
-      if (dropRef.current && !dropRef.current.contains(e.target)) {
-        setTypeOpen(false);
-      }
+      if (dropRef.current && !dropRef.current.contains(e.target)) setEcoleOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [typeOpen]);
+  }, [ecoleOpen]); // eslint-disable-line
 
   const handleLogout = () => { logout(); navigate('/login'); };
 
-  const activeOption = getTypeOption(effectiveType);
-
-  const handleSelectType = (opt) => {
-    setTypeOpen(false);
-    if (opt.value === activeTypeEtab) return;
-    setActiveTypeEtab(opt.value);
-    window.location.href = '/dashboard';
+  // Changer d'école recharge l'application : toutes les pages repartent des données de
+  // la nouvelle école (aucune donnée de l'ancienne ne reste en mémoire).
+  const choisirEcole = (ecole) => {
+    setEcoleOpen(false);
+    if (ecole.code_etab === etab?.code_etab) return;
+    connectToEtab(ecole);
+    window.location.href = '/';
   };
+
+  const ecolesFiltrees = (ecoles || []).filter(e =>
+    `${e.lib_etab} ${e.code_etab}`.toLowerCase().includes(recherche.toLowerCase()));
 
   const selectStyle = {
     height: 28, padding: '0 24px 0 8px', fontSize: 12, fontWeight: 600,
@@ -78,103 +84,78 @@ export default function Navbar({ collapsed, onToggle }) {
 
       <Breadcrumb />
 
-      {/* ── Sélecteur type d'établissement — SUPER_ADMIN : dropdown custom ── */}
+      {/* ── École connectée — SUPER_ADMIN : sélecteur d'école, regroupé par type ── */}
       {isSuperAdmin && (
         <div ref={dropRef} style={{ position: 'relative', marginLeft: 16 }}>
           <button
-            onClick={() => setTypeOpen(v => !v)}
-            title={t.nav.typeEtab || "Type d'établissement"}
+            onClick={() => setEcoleOpen(v => !v)}
+            title={lang === 'fr' ? "Changer d'établissement" : 'Switch school'}
             style={{
-              display: 'flex', alignItems: 'center', gap: 7,
+              display: 'flex', alignItems: 'center', gap: 7, maxWidth: 320,
               padding: '4px 10px 4px 8px',
-              background: activeOption ? `${activeOption.color}15` : 'var(--bg-darkest)',
-              border: `1px solid ${activeOption ? `${activeOption.color}50` : 'var(--border)'}`,
-              borderRadius: 20, cursor: 'pointer',
-              transition: 'var(--transition)',
+              background: typeOption ? `${typeOption.color}15` : 'var(--bg-darkest)',
+              border: `1px solid ${typeOption ? `${typeOption.color}50` : 'var(--border)'}`,
+              borderRadius: 20, cursor: 'pointer', transition: 'var(--transition)',
             }}
           >
-            <i
-              className={activeOption ? activeOption.icon : 'fas fa-building'}
-              style={{ fontSize: 11, color: activeOption ? activeOption.color : 'var(--text-muted)' }}
-            />
+            <i className={typeOption ? typeOption.icon : 'fas fa-building'}
+              style={{ fontSize: 11, color: typeOption ? typeOption.color : 'var(--text-muted)' }} />
             <span style={{
-              fontSize: 11, fontWeight: 700,
-              color: activeOption ? activeOption.color : 'var(--text-muted)',
-              whiteSpace: 'nowrap',
+              fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              color: typeOption ? typeOption.color : 'var(--text-muted)',
             }}>
-              {activeOption
-                ? (lang === 'fr' ? activeOption.labelFr : activeOption.labelEn)
-                : (lang === 'fr' ? 'Tous types' : 'All types')}
+              {etab?.lib_etab || (lang === 'fr' ? 'Choisir un établissement' : 'Choose a school')}
             </span>
-            <i
-              className={`fas fa-chevron-${typeOpen ? 'up' : 'down'}`}
-              style={{ fontSize: 9, color: activeOption ? activeOption.color : 'var(--text-muted)', opacity: .7 }}
-            />
+            <i className={`fas fa-chevron-${ecoleOpen ? 'up' : 'down'}`}
+              style={{ fontSize: 9, color: typeOption ? typeOption.color : 'var(--text-muted)', opacity: .7 }} />
           </button>
 
-          {/* Dropdown menu */}
-          {typeOpen && (
+          {ecoleOpen && (
             <div style={{
               position: 'absolute', top: 'calc(100% + 6px)', left: 0,
               background: 'var(--bg-card)', border: '1px solid var(--border)',
               borderRadius: 10, boxShadow: 'var(--shadow)',
-              minWidth: 180, zIndex: 2000, overflow: 'hidden',
+              width: 320, maxHeight: 420, overflowY: 'auto', zIndex: 2000,
               animation: 'fadeIn .12s ease',
             }}>
-              {/* Option "Tous types" */}
-              <button
-                onClick={() => { setTypeOpen(false); setActiveTypeEtab(null); window.location.href = '/dashboard'; }}
-                style={{
-                  width: '100%', display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '9px 14px', background: !effectiveType ? 'var(--bg-darkest)' : 'transparent',
-                  border: 'none', borderBottom: '1px solid var(--border)',
-                  cursor: 'pointer', textAlign: 'left',
-                  color: 'var(--text-muted)', fontSize: 12,
-                  transition: 'background .15s',
-                }}
-                onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-darkest)'}
-                onMouseLeave={e => e.currentTarget.style.background = !effectiveType ? 'var(--bg-darkest)' : 'transparent'}
-              >
-                <i className="fas fa-globe" style={{ fontSize: 12, width: 16, textAlign: 'center', color: 'var(--text-muted)' }} />
-                <span style={{ fontWeight: !effectiveType ? 700 : 400 }}>
-                  {lang === 'fr' ? 'Tous types' : 'All types'}
-                </span>
-                {!effectiveType && <i className="fas fa-check" style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-muted)' }} />}
-              </button>
-
-              {/* Options PRIMAIRE / SECONDAIRE / SUPERIEUR */}
-              {TYPE_ETAB_OPTIONS.map(opt => {
-                const isActive = effectiveType === opt.value;
+              <div style={{ padding: 8, borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, background: 'var(--bg-card)' }}>
+                <input className="sms-input" autoFocus value={recherche} onChange={e => setRecherche(e.target.value)}
+                  placeholder={lang === 'fr' ? 'Rechercher un établissement…' : 'Search a school…'}
+                  style={{ height: 30, fontSize: 12 }} />
+              </div>
+              {ecoles === null ? (
+                <div style={{ padding: 14, fontSize: 12, color: 'var(--text-muted)' }}>…</div>
+              ) : TYPE_ETAB_OPTIONS.map(opt => {
+                const liste = ecolesFiltrees.filter(e => e.type_etab === opt.value);
+                if (liste.length === 0) return null;
                 return (
-                  <button
-                    key={opt.value}
-                    onClick={() => handleSelectType(opt)}
-                    style={{
-                      width: '100%', display: 'flex', alignItems: 'center', gap: 10,
-                      padding: '9px 14px',
-                      background: isActive ? `${opt.color}12` : 'transparent',
-                      border: 'none', borderBottom: opt.value !== 'PRIMAIRE' ? '1px solid var(--border)' : 'none',
-                      cursor: 'pointer', textAlign: 'left',
-                      transition: 'background .15s',
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.background = `${opt.color}1a`}
-                    onMouseLeave={e => e.currentTarget.style.background = isActive ? `${opt.color}12` : 'transparent'}
-                  >
-                    <i
-                      className={opt.icon}
-                      style={{ fontSize: 12, width: 16, textAlign: 'center', color: opt.color }}
-                    />
-                    <span style={{
-                      fontSize: 12, fontWeight: isActive ? 700 : 500,
-                      color: isActive ? opt.color : 'var(--text-secondary)',
-                      flex: 1,
-                    }}>
-                      {lang === 'fr' ? opt.labelFr : opt.labelEn}
-                    </span>
-                    {isActive && (
-                      <i className="fas fa-check" style={{ fontSize: 10, color: opt.color }} />
-                    )}
-                  </button>
+                  <div key={opt.value}>
+                    <div style={{ padding: '8px 14px 4px', fontSize: 10, fontWeight: 700, letterSpacing: 1,
+                      textTransform: 'uppercase', color: opt.color, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <i className={opt.icon} /> {lang === 'fr' ? opt.labelFr : opt.labelEn}
+                    </div>
+                    {liste.map(e => {
+                      const actif = e.code_etab === etab?.code_etab;
+                      return (
+                        <button key={e.code_etab} onClick={() => choisirEcole(e)}
+                          style={{
+                            width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+                            padding: '7px 14px 7px 30px', border: 'none', cursor: 'pointer', textAlign: 'left',
+                            background: actif ? `${opt.color}12` : 'transparent', transition: 'background .15s',
+                          }}
+                          onMouseEnter={ev => ev.currentTarget.style.background = `${opt.color}1a`}
+                          onMouseLeave={ev => ev.currentTarget.style.background = actif ? `${opt.color}12` : 'transparent'}
+                        >
+                          <span style={{ flex: 1, fontSize: 12, fontWeight: actif ? 700 : 500,
+                            color: actif ? opt.color : 'var(--text-secondary)' }}>
+                            {e.lib_etab}
+                            <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--text-muted)', fontWeight: 400 }}>{e.code_etab}</span>
+                          </span>
+                          {actif && <i className="fas fa-check" style={{ fontSize: 10, color: opt.color }} />}
+                        </button>
+                      );
+                    })}
+                  </div>
                 );
               })}
             </div>
@@ -182,23 +163,20 @@ export default function Navbar({ collapsed, onToggle }) {
         </div>
       )}
 
-      {/* ── Badge lecture seule — utilisateurs non SUPER_ADMIN ─────────────── */}
-      {!isSuperAdmin && activeTypeEtab && (() => {
-        const opt = getTypeOption(activeTypeEtab);
-        if (!opt) return null;
-        return (
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 5, marginLeft: 16,
-            padding: '3px 10px', borderRadius: 20,
-            background: `${opt.color}12`, border: `1px solid ${opt.color}40`,
-            fontSize: 11, fontWeight: 700, color: opt.color,
-            userSelect: 'none',
-          }}>
-            <i className={opt.icon} style={{ fontSize: 10 }} />
-            <span>{lang === 'fr' ? opt.labelFr : opt.labelEn}</span>
-          </div>
-        );
-      })()}
+      {/* ── École du compte — lecture seule pour les autres rôles ─────────────── */}
+      {!isSuperAdmin && etab && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6, marginLeft: 16, maxWidth: 320,
+          padding: '3px 10px', borderRadius: 20,
+          background: typeOption ? `${typeOption.color}12` : 'var(--bg-darkest)',
+          border: `1px solid ${typeOption ? `${typeOption.color}40` : 'var(--border)'}`,
+          fontSize: 11, fontWeight: 700, color: typeOption ? typeOption.color : 'var(--text-muted)',
+          userSelect: 'none',
+        }}>
+          {typeOption && <i className={typeOption.icon} style={{ fontSize: 10 }} />}
+          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{etab.lib_etab}</span>
+        </div>
+      )}
 
       {/* ── Sélecteur d'année scolaire ──────────────────────────────────────── */}
       {anneeActive && annees.length > 0 && (

@@ -13,11 +13,13 @@ def get_client_ip(request):
 def log_action(request, action, model_name, object_id='', detail=''):
     from .models import AuditLog
     try:
+        from .mixins import trusted_etablissement_header
         user_login = request.user.username if request.user and request.user.is_authenticated else ''
+        etab_id = trusted_etablissement_header(request) if user_login else ''
         AuditLog.objects.create(
             utilisateur=user_login, action=action, modele=model_name,
             objet_id=str(object_id)[:100], detail=str(detail)[:500],
-            ip_address=get_client_ip(request),
+            ip_address=get_client_ip(request), etablissement_id=etab_id or None,
         )
     except Exception as exc:
         logger.error('log_action failed: %s', exc)

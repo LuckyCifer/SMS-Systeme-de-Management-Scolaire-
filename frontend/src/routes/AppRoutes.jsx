@@ -38,6 +38,7 @@ const RapportStat     = lazy(() => import('../pages/RapportStat'));
 const Factures        = lazy(() => import('../pages/Factures'));
 const Bareme          = lazy(() => import('../pages/Bareme'));
 const Matieres        = lazy(() => import('../pages/Matieres'));
+const Coefficients    = lazy(() => import('../pages/Coefficients'));
 const Parametrage     = lazy(() => import('../pages/Parametrage'));
 const Parametres      = lazy(() => import('../pages/Parametres'));
 const Absences        = lazy(() => import('../pages/Absences'));
@@ -80,6 +81,7 @@ export default function AppRoutes() {
           <Route path="factures"       element={<RoleGuard page="payments"><Factures /></RoleGuard>} />
           <Route path="bareme"         element={<RoleGuard page="payments"><Bareme /></RoleGuard>} />
           <Route path="matieres"       element={<RoleGuard page="cours"><Matieres /></RoleGuard>} />
+          <Route path="coefficients"   element={<RoleGuard page="coefficients"><Coefficients /></RoleGuard>} />
           <Route path="parametrage"    element={<RoleGuard page="users"><Parametrage /></RoleGuard>} />
           <Route path="parametres"     element={<RoleGuard page="users"><Parametres /></RoleGuard>} />
           <Route path="absences"       element={<RoleGuard page="absences"><Absences /></RoleGuard>} />

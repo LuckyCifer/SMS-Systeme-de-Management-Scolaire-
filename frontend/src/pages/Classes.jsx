@@ -7,6 +7,7 @@ import { classeService, niveauScolaireService } from '../services/endpoints';
 import { LoadingState, ErrorState } from '../components/ApiState';
 import { useEtablissement } from '../hooks/useEtablissement';
 import { etabLabels } from '../utils/etabLabels';
+import { SERIES_PAR_NIVEAU, LIB_SERIE } from '../utils/notes';
 
 function Form({ item, onClose, onSave, niveauxOptions, labels, departements, specialites }) {
   const { t } = useApp();
@@ -23,6 +24,7 @@ function Form({ item, onClose, onSave, niveauxOptions, labels, departements, spe
     eff_max:         item?.eff_max          || 50,
     obs_classe:      item?.obs_classe       || '',
     systeme:         item?.systeme          || '',
+    serie:           item?.serie            || '',
   });
 
   // Spécialités filtrées selon le département sélectionné dans le formulaire
@@ -38,6 +40,8 @@ function Form({ item, onClose, onSave, niveauxOptions, labels, departements, spe
       const next = { ...prev, [name]: value };
       // Réinitialise la spécialité si le département change
       if (name === 'code_dep') next.code_sp = '';
+      // La série n'existe qu'au second cycle : elle suit le niveau choisi.
+      if (name === 'niveau_scolaire' && !(SERIES_PAR_NIVEAU[value] || []).includes(next.serie)) next.serie = '';
       return next;
     });
   };
@@ -51,7 +55,7 @@ function Form({ item, onClose, onSave, niveauxOptions, labels, departements, spe
   ];
 
   return (
-    <form onSubmit={e => { e.preventDefault(); onSave({ ...f, code_sp: f.code_sp || null, code_dep: f.code_dep || null, systeme: f.systeme || null }); }}>
+    <form onSubmit={e => { e.preventDefault(); onSave({ ...f, code_sp: f.code_sp || null, code_dep: f.code_dep || null, systeme: f.systeme || null, serie: f.serie || null }); }}>
       <div className="sms-form-row">
         <FormField label={`${t.common.colCode} *`} name="code_classe" value={f.code_classe} onChange={ch} required disabled={!!item} placeholder="Ex : GI1-L1" />
         <FormField label={`${t.fields.libelle} *`} name="lib_classe"  value={f.lib_classe}  onChange={ch} required placeholder="Ex : Génie Informatique — Licence 1" />
@@ -101,6 +105,16 @@ function Form({ item, onClose, onSave, niveauxOptions, labels, departements, spe
         />
         <FormField label={t.fields.batiment} name="code_bat" value={f.code_bat} onChange={ch} placeholder="Ex : Bât. A" />
       </div>
+
+      {/* Série : troisième langue en 4ème/3ème, série au second cycle — détermine les
+          coefficients de la classe (page Coefficients). « 6ème A » n'a pas de série. */}
+      {SERIES_PAR_NIVEAU[f.niveau_scolaire] && (
+        <FormField
+          label="Série" name="serie" type="select" value={f.serie} onChange={ch} required
+          options={SERIES_PAR_NIVEAU[f.niveau_scolaire].map(s => ({ value: s, label: LIB_SERIE[s] }))}
+          help="Détermine les coefficients appliqués à cette classe (page Coefficients)."
+        />
+      )}
 
       <div className="sms-form-row">
         <FormField label={t.fields.effMax} name="eff_max"    type="number" value={f.eff_max}    onChange={ch} placeholder="Ex : 30" />
@@ -165,7 +179,8 @@ export default function Classes() {
   const { mutate: remove } = useMutation(useCallback((d) => classeService.delete(d.code_classe), []));
 
   const { data: niveaux } = useApi(useCallback(() =>
-    niveauScolaireService.list({ type_etab: typeEtab, systeme, page_size: 100 }),
+    // Établissement bilingue : niveaux francophones ET anglophones.
+    niveauScolaireService.list({ type_etab: typeEtab, ...(systeme && systeme !== 'BILINGUE' ? { systeme } : {}), page_size: 100 }),
     [typeEtab, systeme]
   ));
 
@@ -188,6 +203,13 @@ export default function Classes() {
     }] : []),
     { accessor:'lib_dep',          label: labels.departementLabel },
     { accessor:'lib_niv_scolaire', label: t.pages.parametres?.niveauScolaire || labels.niveauLabel },
+    ...(labels.isSecondaire ? [{
+      key: 'serie', label: 'Série', searchValue: r => r.serie || '', render: r => r.serie
+        ? <span className="sms-badge badge-info">{LIB_SERIE[r.serie] || r.serie}</span>
+        : (SERIES_PAR_NIVEAU[r.niveau_scolaire]
+            ? <span className="sms-badge badge-warning" title="Série à renseigner pour appliquer les coefficients">à renseigner</span>
+            : <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>—</span>),
+    }] : []),
     { accessor:'lib_bat',        label: t.fields.batiment },
     { key:'eff', label: t.fields.effMax, render: r => (
       <div className="flex items-center gap-2">

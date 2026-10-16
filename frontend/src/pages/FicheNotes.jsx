@@ -11,6 +11,7 @@ import { ficheNotesService } from '../services/endpoints';
 import { LoadingState, ErrorState } from '../components/ApiState';
 import { useEtablissement } from '../hooks/useEtablissement';
 import { etabLabels } from '../utils/etabLabels';
+import { APPRECIATION_BADGE, appreciationDepuisNote } from '../utils/notes';
 
 const APPRECIATIONS = ['A', 'ECA', 'NA'];
 
@@ -57,8 +58,11 @@ function SaisieModal({ fiche, onClose, toast }) {
     load();
   }, [fiche.code_fiche]);
 
-  const setNote   = (mle, note)   => setDetails(prev => prev.map(d => d.mle === mle ? { ...d, note } : d));
-  const setAppreciation = (mle, appreciation) => setDetails(prev => prev.map(d => d.mle === mle ? { ...d, appreciation } : d));
+  // Primaire : la note /20 est saisie, son appréciation A/ECA/NA en est déduite
+  // (00-09 NA, 10-14 ECA, 15-20 A) — recalculée aussi par le backend à l'import.
+  const setNote   = (mle, note)   => setDetails(prev => prev.map(d => d.mle === mle
+    ? { ...d, note, appreciation: isPrimaire ? (appreciationDepuisNote(note) || '') : '' }
+    : d));
   const setAbsent = (mle, absent) => setDetails(prev => prev.map(d => d.mle === mle
     ? { ...d, absent, note: absent ? '' : d.note, appreciation: absent ? '' : d.appreciation }
     : d));
@@ -71,13 +75,11 @@ function SaisieModal({ fiche, onClose, toast }) {
       await Promise.all(toDelete.map(d => api.delete(`/api/fiches-notes-detail/${d.id}/`)));
       await Promise.all(details.map(d => api.post('/api/fiches-notes-detail/', {
         code_fiche: fiche.code_fiche, mle_etudiant: d.mle,
-        note: (!isPrimaire && !d.absent && d.note !== '') ? parseFloat(d.note) : null,
-        appreciation: (isPrimaire && !d.absent && d.appreciation) ? d.appreciation : null,
+        note: (!d.absent && d.note !== '') ? parseFloat(d.note) : null,
+        appreciation: (isPrimaire && !d.absent && d.note !== '') ? appreciationDepuisNote(d.note) : null,
         absent: d.absent,
       })));
-      const nbSaisies = isPrimaire
-        ? details.filter(d => !d.absent && d.appreciation).length
-        : details.filter(d => !d.absent && d.note !== '').length;
+      const nbSaisies = details.filter(d => !d.absent && d.note !== '').length;
       toast.success(`${nbSaisies} ${t.common.saveNotes.toLowerCase()}.`);
       onClose();
     } catch { toast.error(t.errors.saving); }
@@ -90,10 +92,13 @@ function SaisieModal({ fiche, onClose, toast }) {
     return (notes.reduce((a, b) => a + b, 0) / notes.length).toFixed(2);
   };
 
-  // Primaire (évaluation par compétences) : pas de moyenne numérique — répartition A/ECA/NA.
+  // Primaire : répartition A/ECA/NA des notes saisies, en plus de la moyenne.
   const repartition = () => {
     const counts = { A: 0, ECA: 0, NA: 0 };
-    details.forEach(d => { if (!d.absent && d.appreciation) counts[d.appreciation]++; });
+    details.forEach(d => {
+      const a = !d.absent && appreciationDepuisNote(d.note);
+      if (a) counts[a]++;
+    });
     return counts;
   };
 
@@ -114,30 +119,24 @@ function SaisieModal({ fiche, onClose, toast }) {
                 padding: '8px 12px', background: 'var(--bg-darkest)', borderRadius: 8 }}>
                 <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                   {fiche.lib_classe} · {fiche.date_evaluation}
-                  {!isPrimaire && <> · {t.fields.bareme} : {fiche.bareme}/20</>}
+                  {' · '}{t.fields.bareme} : {fiche.bareme}/20
                 </span>
-                {isPrimaire ? (
-                  <span style={{ fontSize: 12, fontWeight: 700, display: 'flex', gap: 10 }}>
-                    {APPRECIATIONS.map(a => (
-                      <span key={a} style={{ color: 'var(--text-secondary)' }}>
-                        {a} : <strong style={{ color: 'var(--green)' }}>{repartition()[a]}</strong>
-                      </span>
-                    ))}
-                  </span>
-                ) : (
-                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--green)' }}>
-                    {t.common.classAvg} : <strong>{moy()}</strong>
-                  </span>
-                )}
+                <span style={{ fontSize: 12, fontWeight: 700, display: 'flex', gap: 10, color: 'var(--green)' }}>
+                  <span>{t.common.classAvg} : <strong>{moy()}</strong></span>
+                  {isPrimaire && APPRECIATIONS.map(a => (
+                    <span key={a} style={{ color: 'var(--text-secondary)' }}>
+                      {a} : <strong style={{ color: 'var(--green)' }}>{repartition()[a]}</strong>
+                    </span>
+                  ))}
+                </span>
               </div>
               <div className="sms-table-wrap">
                 <table className="sms-table" style={{ fontSize: 12 }}>
                   <thead>
                     <tr>
                       <th>{labels.studentLabel}</th>
-                      <th style={{ textAlign: 'center', width: 100 }}>
-                        {isPrimaire ? t.fields.appreciation : t.fields.note}
-                      </th>
+                      <th style={{ textAlign: 'center', width: 100 }}>{t.fields.note}</th>
+                      {isPrimaire && <th style={{ textAlign: 'center', width: 90 }}>{t.fields.appreciation}</th>}
                       <th style={{ textAlign: 'center', width: 80 }}>{t.fields.statut}</th>
                     </tr>
                   </thead>
@@ -149,30 +148,23 @@ function SaisieModal({ fiche, onClose, toast }) {
                           <strong>{d.nom}</strong>
                         </td>
                         <td style={{ textAlign: 'center' }}>
-                          {isPrimaire ? (
-                            <select
-                              value={d.appreciation} disabled={d.absent}
-                              onChange={e => setAppreciation(d.mle, e.target.value)}
-                              style={{ width: 90, textAlign: 'center', padding: '4px 6px',
-                                background: 'var(--bg-darkest)', border: '1px solid var(--border)',
-                                borderRadius: 6, color: 'var(--text-primary)',
-                                opacity: d.absent ? 0.4 : 1 }}
-                            >
-                              <option value="">—</option>
-                              {APPRECIATIONS.map(a => <option key={a} value={a}>{a}</option>)}
-                            </select>
-                          ) : (
-                            <input
-                              type="number" min="0" max="20" step="0.25"
-                              value={d.note} disabled={d.absent}
-                              onChange={e => setNote(d.mle, e.target.value)}
-                              style={{ width: 70, textAlign: 'center', padding: '4px 6px',
-                                background: 'var(--bg-darkest)', border: '1px solid var(--border)',
-                                borderRadius: 6, color: 'var(--text-primary)',
-                                opacity: d.absent ? 0.4 : 1 }}
-                            />
-                          )}
+                          <input
+                            type="number" min="0" max="20" step="0.25"
+                            value={d.note} disabled={d.absent}
+                            onChange={e => setNote(d.mle, e.target.value)}
+                            style={{ width: 70, textAlign: 'center', padding: '4px 6px',
+                              background: 'var(--bg-darkest)', border: '1px solid var(--border)',
+                              borderRadius: 6, color: 'var(--text-primary)',
+                              opacity: d.absent ? 0.4 : 1 }}
+                          />
                         </td>
+                        {isPrimaire && (
+                          <td style={{ textAlign: 'center' }}>
+                            {!d.absent && appreciationDepuisNote(d.note)
+                              ? <span className={`sms-badge ${APPRECIATION_BADGE[appreciationDepuisNote(d.note)]}`}>{appreciationDepuisNote(d.note)}</span>
+                              : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                          </td>
+                        )}
                         <td style={{ textAlign: 'center' }}>
                           <input type="checkbox" checked={d.absent}
                             onChange={e => setAbsent(d.mle, e.target.checked)}
@@ -201,8 +193,6 @@ function SaisieModal({ fiche, onClose, toast }) {
 // ── Formulaire fiche ─────────────────────────────────────────────────────────
 function Form({ item, onClose, onSave }) {
   const { t } = useApp();
-  const { typeEtab } = useEtablissement();
-  const isPrimaire = typeEtab === 'PRIMAIRE';
   const [matieres,    setMatieres]    = useState([]);
   const [classes,     setClasses]     = useState([]);
   const [enseignants, setEns]         = useState([]);
@@ -317,16 +307,13 @@ function Form({ item, onClose, onSave }) {
       <div className="sms-form-row">
         <SearchableSelect
           label={t.fields.periode} name="code_periode" value={f.code_periode} onChange={ch} required
-          options={periodes.map(p => ({ value: p.code_periode, label: p.lib_periode }))}
+          options={periodes.map(p => ({ value: p.code_periode, label: p.lib_parent ? `${p.lib_periode} (${p.lib_parent})` : p.lib_periode }))}
         />
         <FormField label={t.fields.annee} name="code_annee" value={f.code_annee} onChange={ch} required placeholder="2025-2026" />
       </div>
       <div className="sms-form-row">
         <FormField label={t.fields.dateCours} name="date_evaluation" type="date" value={f.date_evaluation} onChange={ch} required help="Format : JJ/MM/AAAA" />
-        {/* Barème /20 sans objet en évaluation par compétences (primaire réformé) */}
-        {!isPrimaire && (
-          <FormField label={t.fields.bareme} name="bareme" type="number" value={f.bareme} onChange={ch} />
-        )}
+        <FormField label={t.fields.bareme} name="bareme" type="number" value={f.bareme} onChange={ch} />
       </div>
       <FormField label={t.fields.obs} name="observations" type="textarea" value={f.observations} onChange={ch} />
       <div className="sms-modal-footer" style={{ padding: '14px 0 0', border: 'none' }}>

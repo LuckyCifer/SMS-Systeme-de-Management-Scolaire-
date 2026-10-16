@@ -12,6 +12,7 @@ import { getUser } from '../utils/Auth';
 import { generateBulletin } from '../services/pdfService';
 import { useEtablissement } from '../hooks/useEtablissement';
 import { etabLabels } from '../utils/etabLabels';
+import { APPRECIATION_BADGE, rangLabel } from '../utils/notes';
 
 const moyColor = v => {
   if (v >= 16) return '#2e7d32';
@@ -51,7 +52,8 @@ export default function MonDossier() {
 
   const [etudiant,   setEtudiant]   = useState(null);
   const [inscription, setInscription] = useState(null);
-  const [evals,      setEvals]      = useState([]);
+  // Bilan annuel de l'élève dans sa classe (api/notes.py) — moyennes, rang, appréciations.
+  const [resultat,   setResultat]   = useState(null);
   const [paiements,  setPaiements]  = useState([]);
   const [absStats,   setAbsStats]   = useState(null);
   const [planning,   setPlanning]   = useState([]);
@@ -109,15 +111,21 @@ export default function MonDossier() {
       const lastInsc = inscList[inscList.length - 1] || null;
       setInscription(lastInsc);
 
+      const codeAnnee = lastInsc?.code_annee?.code_annee || lastInsc?.code_annee || anneeActive?.code_annee;
       const [evRes, payRes, absRes, planRes] = await Promise.all([
-        api.get(`/api/evaluations/?mle_etudiant=${mle}&page_size=500`),
+        (lastInsc?.code_classe && codeAnnee)
+          ? api.get('/api/evaluations/moyennes/', { params: {
+              code_classe: lastInsc.code_classe?.code_classe || lastInsc.code_classe,
+              code_annee: codeAnnee, mle_etudiant: mle,
+            } })
+          : Promise.resolve({ data: [] }),
         api.get(`/api/etudiants/${mle}/paiements/`),
         api.get(`/api/etudiants/${mle}/absences-stats/`),
         lastInsc?.code_classe
           ? api.get(`/api/planning/?code_cours__code_classe=${lastInsc.code_classe}${anneeActive?.code_annee ? `&code_cours__code_annee=${anneeActive.code_annee}` : ''}&page_size=200`)
           : Promise.resolve({ data: { results: [] } }),
       ]);
-      setEvals(evRes.data.results ?? evRes.data);
+      setResultat((evRes.data ?? [])[0] || null);
       setPaiements(payRes.data.results ?? payRes.data);
       setAbsStats(absRes.data);
       setPlanning(planRes.data.results ?? planRes.data ?? []);
@@ -144,22 +152,13 @@ export default function MonDossier() {
     loadDossier(trimmed);
   };
 
-  // Grouper les évals par matière
-  const byMatiere = {};
-  evals.forEach(e => {
-    const mat = e.lib_matiere || e.code_matiere?.lib_matiere || e.code_matiere || '?';
-    if (!byMatiere[mat]) byMatiere[mat] = [];
-    byMatiere[mat].push(parseFloat(e.note));
-  });
-  const matieres = Object.entries(byMatiere).map(([mat, notes]) => ({
-    mat,
-    moy: (notes.reduce((a, b) => a + b, 0) / notes.length).toFixed(2),
-    nb:  notes.length,
-  })).sort((a, b) => parseFloat(b.moy) - parseFloat(a.moy));
+  // Moyennes par matière de l'année (calculées par le backend, comme les bulletins).
+  const matieres = (resultat?.matieres || [])
+    .filter(m => m.moyenne !== null)
+    .map(m => ({ mat: m.lib_matiere, moy: m.moyenne.toFixed(2), nb: m.nb_evals, appreciation: m.appreciation }))
+    .sort((a, b) => parseFloat(b.moy) - parseFloat(a.moy));
 
-  const moyGen = matieres.length
-    ? (matieres.reduce((s, m) => s + parseFloat(m.moy), 0) / matieres.length).toFixed(2)
-    : null;
+  const moyGen = resultat?.moyenne_generale != null ? resultat.moyenne_generale.toFixed(2) : null;
 
   // Paiements totaux
   const totalPaye  = paiements.reduce((s, p) => s + Number(p.mt_paiement || 0), 0);
@@ -170,7 +169,10 @@ export default function MonDossier() {
     if (!etudiant || matieres.length === 0) return;
     setGenerating(true);
     try {
-      const { blob, filename } = await generateBulletin(etudiant, evals, '', etab);
+      const classeLib = inscription?.lib_classe || etudiant?.lib_classe || '';
+      const codeAnnee = inscription?.code_annee?.code_annee || inscription?.code_annee || anneeActive?.code_annee || '';
+      const { blob, filename } = await generateBulletin(
+        { ...etudiant, lib_classe: classeLib }, resultat, `Année ${codeAnnee}`, etab);
       showPreview(blob, filename);
     } catch { toast.error(t.errors.saving); }
     finally  { setGenerating(false); }
@@ -190,7 +192,7 @@ export default function MonDossier() {
           {loaded && (
             <button
               className="sms-btn sms-btn-outline"
-              onClick={() => { setLoaded(false); setEtudiant(null); setInscription(null); setEvals([]); setPaiements([]); setAbsStats(null); setPlanning([]); setNotFound(false); setQuery(''); setSuggestions([]); setTab('notes'); }}
+              onClick={() => { setLoaded(false); setEtudiant(null); setInscription(null); setResultat(null); setPaiements([]); setAbsStats(null); setPlanning([]); setNotFound(false); setQuery(''); setSuggestions([]); setTab('notes'); }}
             >
               <i className="fas fa-arrow-left"></i> {t.common.back || 'Retour'}
             </button>
@@ -364,6 +366,10 @@ export default function MonDossier() {
                   <div style={{ fontSize: 24, fontWeight: 800, color: moyColor(parseFloat(moyGen)) }}>
                     {moyGen}/20
                   </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    {resultat?.appreciation_generale && <>{resultat.appreciation_generale} · </>}
+                    Rang : {rangLabel(resultat)}{resultat?.effectif ? ` / ${resultat.effectif}` : ''}
+                  </div>
                 </div>
               )}
               {absStats && (
@@ -422,9 +428,15 @@ export default function MonDossier() {
                               <strong style={{ color: moyColor(moy), fontSize: 15 }}>{m.moy}/20</strong>
                             </td>
                             <td style={{ textAlign: 'center' }}>
-                              <span className={`sms-badge ${ok ? 'badge-success' : 'badge-danger'}`}>
-                                {ok ? t.status.admis : t.status.ajourné}
-                              </span>
+                              {m.appreciation ? (
+                                <span className={`sms-badge ${APPRECIATION_BADGE[m.appreciation]}`}>
+                                  {m.appreciation} — {t.appreciations[m.appreciation]}
+                                </span>
+                              ) : (
+                                <span className={`sms-badge ${ok ? 'badge-success' : 'badge-danger'}`}>
+                                  {ok ? t.status.admis : t.status.ajourné}
+                                </span>
+                              )}
                             </td>
                           </tr>
                         );

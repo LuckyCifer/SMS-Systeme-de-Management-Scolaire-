@@ -28,10 +28,11 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-from .utils import get_client_ip, log_action, moyenne_ponderee
+from .utils import get_client_ip, log_action
+from .notes import calculer_resultats, deliberer, generer_sequences, series_du_niveau
 from .permissions import RoleBasedPermission
 from .mixins import (
-    EtablissementFilterMixin, trusted_etablissement_header, trusted_type_etab_header,
+    EtablissementFilterMixin, EtablissementParRelationMixin, trusted_etablissement_header, type_etab_courant,
     is_super_admin, get_utilisateur_profile,
     scope_queryset_to_enseignant, scope_queryset_to_enseignant_cours, assert_enseignant_teaches,
     is_enseignant, get_enseignant_profile,
@@ -44,13 +45,13 @@ from .models import (
     Personnel, POSTES_SIGNATAIRES,
     Tranche, Frais, Inscription, FraisInscription, Paiement, PaiementSalaire, Moratoire,
     Facture, FactureDetail, RapportFinancier,
-    Matiere, Qualification, Cours, UniteEnseignement, Periode, Evaluation,
+    Matiere, Qualification, Cours, Periode, Evaluation,
     FicheNotes, FicheNotesDetail,
     Planning, RapportCours, Seance, Absence,
     Examen, Epreuve, Convocation, RapportStatistique, RapportAssiduite,
     Decision, Diplome, CarteEtudiant, Stage, LettreAdmission,
     BadgeAcces, DocumentGenere, AuditLog,
-    NiveauScolaire, ConfigBulletin,
+    NiveauScolaire, ConfigBulletin, CoefficientMatiere,
 )
 from .serializers import (
     TypeEtabSerializer, BatimentSerializer, SalleSerializer, JourSerializer,
@@ -67,7 +68,7 @@ from .serializers import (
     FraisInscriptionSerializer, PaiementSerializer, PaiementSalaireSerializer, MoratoireSerializer,
     FactureSerializer, FactureDetailSerializer, RapportFinancierSerializer,
     MatiereSerializer, QualificationSerializer, CoursSerializer,
-    UniteEnseignementSerializer, PeriodeSerializer, EvaluationSerializer,
+    PeriodeSerializer, EvaluationSerializer,
     FicheNotesSerializer, FicheNotesDetailSerializer,
     PlanningSerializer, RapportCoursSerializer, SeanceSerializer, AbsenceSerializer,
     ExamenSerializer, EpreuveSerializer, ConvocationSerializer, RapportStatistiqueSerializer,
@@ -75,7 +76,7 @@ from .serializers import (
     DecisionSerializer, DiplomeSerializer, CarteEtudiantSerializer,
     StageSerializer, LettreAdmissionSerializer, BadgeAccesSerializer,
     DocumentGenereSerializer, AuditLogSerializer,
-    NiveauScolaireSerializer, ConfigBulletinSerializer,
+    NiveauScolaireSerializer, ConfigBulletinSerializer, CoefficientMatiereSerializer,
 )
 
 
@@ -123,6 +124,12 @@ class IsAdminOrSuperAdmin(BasePermission):
 
 
 # ── Mixin commun ──────────────────────────────────────────────────────────────
+def _scoped_queryset(viewset_cls, request):
+    """Queryset d'un autre ViewSet, restreint aux droits de l'utilisateur courant."""
+    view = viewset_cls(request=request, action='list', format_kwarg=None, kwargs={})
+    return view.get_queryset()
+
+
 class SMSBaseViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, RoleBasedPermission]
     filter_backends    = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -242,7 +249,7 @@ class SmsLoginView(APIView):
             AuditLog.objects.create(
                 utilisateur=login, action='LOGIN_FAILED', modele='Utilisateur',
                 objet_id=login, detail='Mot de passe incorrect',
-                ip_address=get_client_ip(request))
+                ip_address=get_client_ip(request), etablissement_id=user_sms.etablissement_id)
             return Response({'detail': 'Identifiant ou mot de passe incorrect.'},
                             status=status.HTTP_401_UNAUTHORIZED)
 
@@ -258,7 +265,7 @@ class SmsLoginView(APIView):
         AuditLog.objects.create(
             utilisateur=login, action='LOGIN_SUCCESS', modele='Utilisateur',
             objet_id=login, detail=f'Connexion depuis {get_client_ip(request)}',
-            ip_address=get_client_ip(request))
+            ip_address=get_client_ip(request), etablissement_id=user_sms.etablissement_id)
 
         return Response({
             'login':         user_sms.login,
@@ -301,6 +308,16 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
     filter_backends    = [filters.SearchFilter, filters.OrderingFilter, DjangoFilterBackend]
     search_fields      = ['utilisateur', 'action', 'modele', 'objet_id', 'detail']
+
+    def get_queryset(self):
+        # Traces de l'école courante (voir utils.log_action). Le SUPER_ADMIN voit en plus
+        # les traces sans école : connexions échouées de comptes inconnus, et ses propres
+        # actions antérieures à l'isolation par établissement.
+        etab_id = trusted_etablissement_header(self.request)
+        qs = super().get_queryset()
+        if is_super_admin(self.request):
+            return qs.filter(Q(etablissement_id=etab_id) | Q(etablissement__isnull=True))
+        return qs.filter(etablissement_id=etab_id) if etab_id else qs.none()
     filterset_fields   = ['action', 'modele', 'utilisateur']
 
     @action(detail=False, methods=['get'], url_path='stats')
@@ -321,7 +338,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
         response.write('﻿')
         writer = csv.writer(response, delimiter=';')
         writer.writerow(['Date', 'Utilisateur', 'Action', 'Modèle', 'ID Objet', 'Détail', 'IP'])
-        for log in self.get_queryset():
+        for log in self.filter_queryset(self.get_queryset()):
             writer.writerow([
                 log.date_action.strftime('%Y-%m-%d %H:%M:%S') if log.date_action else '',
                 log.utilisateur, log.action, log.modele,
@@ -336,11 +353,11 @@ class TypeEtabViewSet(SMSBaseViewSet):
     serializer_class = TypeEtabSerializer
     search_fields    = ['lib_type']
 
-class BatimentViewSet(SMSBaseViewSet):
+class BatimentViewSet(EtablissementFilterMixin, SMSBaseViewSet):
     queryset         = Batiment.objects.all()
     serializer_class = BatimentSerializer
 
-class SalleViewSet(SMSBaseViewSet):
+class SalleViewSet(EtablissementFilterMixin, SMSBaseViewSet):
     queryset         = Salle.objects.all()
     serializer_class = SalleSerializer
 
@@ -357,7 +374,7 @@ class ModuleViewSet(SMSBaseViewSet):
     serializer_class = ModuleSerializer
     search_fields    = ['lib_module']
 
-class PensionViewSet(SMSBaseViewSet):
+class PensionViewSet(EtablissementFilterMixin, SMSBaseViewSet):
     queryset         = Pension.objects.all()
     serializer_class = PensionSerializer
     filterset_fields = ['type_etab']
@@ -487,6 +504,14 @@ class EtablissementViewSet(SMSBaseViewSet):
             return [IsAuthenticated(), IsAdminOrSuperAdmin()]
         return [IsAuthenticated()]
 
+    def get_queryset(self):
+        # Seul le SUPER_ADMIN navigue entre les écoles ; tout autre compte est lié à la sienne.
+        qs = super().get_queryset()
+        if is_super_admin(self.request):
+            return qs
+        profile = get_utilisateur_profile(self.request)
+        return qs.filter(pk=profile.etablissement_id) if profile and profile.etablissement_id else qs.none()
+
     def partial_update(self, request, *args, **kwargs):
         if request.data.get('clear_logo') in ('1', 'true'):
             instance = self.get_object()
@@ -499,24 +524,13 @@ class EtablissementViewSet(SMSBaseViewSet):
 
     @action(detail=False, methods=['get', 'put', 'patch'], url_path='current')
     def current(self, request):
-        # 1. Respecter l'établissement explicitement sélectionné (SUPER_ADMIN uniquement —
-        #    pour tout autre rôle, trusted_etablissement_header() ignore le header client et
-        #    renvoie toujours le propre établissement de l'utilisateur, jamais celui d'un tiers)
+        # École courante (mixins.trusted_etablissement_header) : la même que celle qui filtre
+        # toutes les données de la requête — jamais une autre, pour que libellés et données
+        # correspondent toujours.
         etab = None
         etab_id = trusted_etablissement_header(request)
         if etab_id:
             etab = Etablissement.objects.filter(code_etab=etab_id).first()
-        # 2. Aucun établissement épinglé : respecter le type sélectionné (SUPER_ADMIN parcourant
-        #    par type, ex. « Secondaire ») pour que le vocabulaire adaptatif (etabLabels côté
-        #    frontend, dérivé de type_etab/systeme) corresponde au type affiché plutôt qu'à un
-        #    établissement arbitraire d'un autre type.
-        if not etab:
-            type_etab_id = trusted_type_etab_header(request)
-            if type_etab_id:
-                etab = Etablissement.objects.filter(actif=True, type_etab=type_etab_id).first()
-        # 3. Fallback : premier établissement actif
-        if not etab:
-            etab = Etablissement.objects.filter(actif=True).first()
         # 4. Dernier recours : n'importe quel établissement (ou création)
         if not etab:
             etab = Etablissement.objects.first()
@@ -537,7 +551,8 @@ class EtablissementViewSet(SMSBaseViewSet):
         return Response(serializer.data)
 
 # NEW: Faculté (niveau intermédiaire entre Etablissement et Département)
-class FaculteViewSet(SMSBaseViewSet):
+class FaculteViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
+    etablissement_lookups = ('code_etab',)
     queryset         = Faculte.objects.select_related('code_etab').all()
     serializer_class = FaculteSerializer
     search_fields    = ['lib_faculte', 'code_faculte']
@@ -555,7 +570,7 @@ class SpecialiteViewSet(EtablissementFilterMixin, SMSBaseViewSet):
     search_fields    = ['lib_sp']
     filterset_fields = ['code_dep']
 
-class CycleViewSet(SMSBaseViewSet):
+class CycleViewSet(EtablissementFilterMixin, SMSBaseViewSet):
     queryset         = Cycle.objects.select_related('code_pension').all()
     serializer_class = CycleSerializer
     filterset_fields = ['type_etab']
@@ -568,7 +583,7 @@ class CycleViewSet(SMSBaseViewSet):
             return qs.filter(Q(type_etab=type_str) | Q(type_etab__isnull=True))
         return qs
 
-class NiveauViewSet(SMSBaseViewSet):
+class NiveauViewSet(EtablissementFilterMixin, SMSBaseViewSet):
     queryset         = Niveau.objects.select_related('code_cycle', 'code_pension').all()
     serializer_class = NiveauSerializer
     filterset_fields = ['code_cycle', 'type_etab']
@@ -610,7 +625,8 @@ class ClasseViewSet(EtablissementFilterMixin, SMSBaseViewSet):
             ])
         return response
 
-class MentionClasseViewSet(SMSBaseViewSet):
+class MentionClasseViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
+    etablissement_lookups = ('code_classe__etablissement',)
     queryset         = MentionClasse.objects.select_related('code_classe', 'code_mention').all()
     serializer_class = MentionClasseSerializer
     filterset_fields = ['code_classe', 'code_mention']
@@ -1177,17 +1193,10 @@ class UtilisateurViewSet(viewsets.ModelViewSet):
         qs = super().get_queryset()
         from django.db.models import Q
 
-        # SUPER_ADMIN : peut parcourir les comptes par type d'établissement via le sélecteur
-        # d'interface (X-Type-Etab). Pour tout autre rôle, le header est ignoré (voir
-        # trusted_type_etab_header) — un utilisateur ne doit jamais pouvoir lister les comptes
-        # d'un autre établissement en changeant un en-tête HTTP (IDOR).
+        # SUPER_ADMIN : comptes de l'école à laquelle il est connecté (+ les SUPER_ADMIN).
         if is_super_admin(self.request):
-            type_etab_id = trusted_type_etab_header(self.request)
-            if type_etab_id:
-                return qs.filter(
-                    Q(type_etab_id=type_etab_id) | Q(type_etab__isnull=True, role='SUPER_ADMIN')
-                )
-            return qs
+            etab_id = trusted_etablissement_header(self.request)
+            return qs.filter(Q(etablissement_id=etab_id) | Q(role='SUPER_ADMIN'))
 
         # Utilisateur normal : uniquement les comptes de son propre établissement, dérivé de
         # son profil en base (jamais d'un header client), + les comptes SUPER_ADMIN.
@@ -1219,13 +1228,14 @@ class UtilisateurViewSet(viewsets.ModelViewSet):
         instance = serializer.save()
         log_action(self.request, 'UPDATE', 'Utilisateur', instance.login)
 
-class TuteurViewSet(SMSBaseViewSet):
+class TuteurViewSet(EtablissementFilterMixin, SMSBaseViewSet):
     queryset         = Tuteur.objects.all()
     serializer_class = TuteurSerializer
     search_fields    = ['nom', 'prenom', 'tel', 'email']
     filterset_fields = ['lien_parente']
 
-class EtudiantTuteurViewSet(SMSBaseViewSet):
+class EtudiantTuteurViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
+    etablissement_lookups = ('mle_etudiant__etablissement',)
     queryset         = EtudiantTuteur.objects.select_related('mle_etudiant', 'code_tuteur').all()
     serializer_class = EtudiantTuteurSerializer
     filterset_fields = ['mle_etudiant', 'code_tuteur', 'est_contact_principal']
@@ -1279,7 +1289,8 @@ class PersonnelViewSet(EtablissementFilterMixin, SMSBaseViewSet):
 
 
 # ── Scolarité & Paiements ─────────────────────────────────────────────────────
-class TrancheViewSet(SMSBaseViewSet):
+class TrancheViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
+    etablissement_lookups = ('code_pension__etablissement',)
     queryset         = Tranche.objects.select_related('code_pension').all()
     serializer_class = TrancheSerializer
     filterset_fields = ['code_pension']
@@ -1295,7 +1306,7 @@ class TrancheViewSet(SMSBaseViewSet):
             )
         return qs
 
-class FraisViewSet(SMSBaseViewSet):
+class FraisViewSet(EtablissementFilterMixin, SMSBaseViewSet):
     queryset         = Frais.objects.select_related('code_annee').all()
     serializer_class = FraisSerializer
     search_fields    = ['lib_frais', 'type_frais']
@@ -1367,7 +1378,8 @@ class InscriptionViewSet(EtablissementFilterMixin, SMSBaseViewSet):
             ])
         return response
 
-class FraisInscriptionViewSet(SMSBaseViewSet):
+class FraisInscriptionViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
+    etablissement_lookups = ('code_inscription__etablissement',)
     queryset         = FraisInscription.objects.select_related(
         'code_inscription', 'code_frais').all()
     serializer_class = FraisInscriptionSerializer
@@ -1490,12 +1502,13 @@ class FactureViewSet(EtablissementFilterMixin, SMSBaseViewSet):
         result['total_restant'] = result['total_du'] - result['total_paye']
         return Response(result)
 
-class FactureDetailViewSet(SMSBaseViewSet):
+class FactureDetailViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
+    etablissement_lookups = ('code_facture__etablissement',)
     queryset         = FactureDetail.objects.select_related('code_facture').all()
     serializer_class = FactureDetailSerializer
     filterset_fields = ['code_facture', 'type_frais']
 
-class RapportFinancierViewSet(SMSBaseViewSet):
+class RapportFinancierViewSet(EtablissementFilterMixin, SMSBaseViewSet):
     queryset         = RapportFinancier.objects.all()
     serializer_class = RapportFinancierSerializer
     filterset_fields = ['code_annee', 'genere_par']
@@ -1505,41 +1518,11 @@ class RapportFinancierViewSet(SMSBaseViewSet):
 _VALID_TYPE_ETAB = {'PRIMAIRE', 'SECONDAIRE', 'SUPERIEUR'}
 
 def _resolve_type_etab_str(request):
-    """
-    Retourne le code string (PRIMAIRE/SECONDAIRE/SUPERIEUR) correspondant
-    au contexte actif, en lisant dans l'ordre :
-      1. X-Type-Etab → string direct (PRIMAIRE/SECONDAIRE/SUPERIEUR)
-                     OU code_type int → lookup Etablissement.type_etab (compat.)
-      2. X-Etablissement-Id → code_etab → Etablissement.type_etab directement
-    Retourne None si le contexte n'est pas déterminable.
-    """
-    try:
-        from .models import Etablissement
-        # Priorité 1 : sélecteur SUPER_ADMIN (ignoré pour tout autre rôle — voir mixins.py)
-        type_header = trusted_type_etab_header(request)
-        if type_header:
-            # Valeur directe (nouveau comportement)
-            if type_header.upper() in _VALID_TYPE_ETAB:
-                return type_header.upper()
-            # Fallback : lookup par code_type integer (compat. ancienne version)
-            try:
-                etab = Etablissement.objects.filter(code_type_id=int(type_header)).first()
-                if etab and etab.type_etab in _VALID_TYPE_ETAB:
-                    return etab.type_etab
-            except (ValueError, TypeError):
-                pass
-        # Priorité 2 : établissement de l'utilisateur (toujours le sien pour un rôle non SUPER_ADMIN)
-        etab_id = trusted_etablissement_header(request)
-        if etab_id:
-            etab = Etablissement.objects.filter(code_etab=etab_id).first()
-            if etab and etab.type_etab in _VALID_TYPE_ETAB:
-                return etab.type_etab
-    except Exception:
-        pass
-    return None
+    """Type (PRIMAIRE/SECONDAIRE/SUPERIEUR) de l'école courante — voir mixins.py."""
+    type_etab = type_etab_courant(request)
+    return type_etab if type_etab in _VALID_TYPE_ETAB else None
 
 
-# ── Pédagogie ─────────────────────────────────────────────────────────────────
 class MatiereViewSet(SMSBaseViewSet):
     queryset         = Matiere.objects.select_related('code_module').all()
     serializer_class = MatiereSerializer
@@ -1554,7 +1537,8 @@ class MatiereViewSet(SMSBaseViewSet):
             return qs.filter(Q(type_etab=type_str) | Q(type_etab__isnull=True))
         return qs
 
-class QualificationViewSet(SMSBaseViewSet):
+class QualificationViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
+    etablissement_lookups = ('mle_ens__etablissement',)
     queryset         = Qualification.objects.select_related('code_matiere', 'mle_ens').all()
     serializer_class = QualificationSerializer
     filterset_fields = ['mle_ens', 'code_matiere']
@@ -1575,16 +1559,20 @@ class CoursViewSet(EtablissementFilterMixin, SMSBaseViewSet):
             qs = qs.filter(code_classe__code_sp=code_sp)
         return qs
 
-class UniteEnseignementViewSet(SMSBaseViewSet):
-    queryset         = UniteEnseignement.objects.select_related(
-        'code_matiere', 'code_classe', 'mle_ens', 'code_annee').all()
-    serializer_class = UniteEnseignementSerializer
-    filterset_fields = ['code_classe', 'code_annee', 'mle_ens']
-
 class PeriodeViewSet(SMSBaseViewSet):
-    queryset         = Periode.objects.select_related('code_annee').all()
+    queryset         = Periode.objects.select_related('code_annee', 'periode_parent').all()
     serializer_class = PeriodeSerializer
-    filterset_fields = ['code_annee', 'type_etab']
+    filterset_fields = ['code_annee', 'type_etab', 'periode_parent']
+
+    @action(detail=False, methods=['post'], url_path='generer-sequences')
+    def generer_sequences(self, request):
+        """Crée les 6 séquences du secondaire (2 par trimestre) pour l'année donnée."""
+        code_annee = request.data.get('code_annee')
+        if not code_annee:
+            return Response({'error': 'code_annee est requis.'}, status=status.HTTP_400_BAD_REQUEST)
+        creees = generer_sequences(code_annee)
+        log_action(request, 'CREATE', 'Periode', code_annee, f'{creees} séquences générées')
+        return Response({'creees': creees})
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -1651,89 +1639,33 @@ class EvaluationViewSet(EtablissementFilterMixin, SMSBaseViewSet):
     @action(detail=False, methods=['get'], url_path='moyennes')
     def moyennes(self, request):
         """
-        Moyennes pondérées par étudiant et par matière, pour une classe et une période
-        données, calculées à partir de TypeEvaluation.ponderation (voir utils.moyenne_ponderee).
+        Moyennes, rangs et appréciations d'une classe — voir api/notes.py (source unique
+        de ces calculs : coefficients au primaire/secondaire, crédits au supérieur,
+        séquences, appréciations A/ECA/NA du primaire, rangs ex-aequo).
 
-        La moyenne générale d'un étudiant est pondérée par les crédits LMD (Cours.credits)
-        de chaque matière notée (numériquement) dans la classe pour cette période. Une
-        matière qu'un étudiant n'a pas composée compte pour 0 dans ses crédits plutôt que
-        d'être exclue du calcul : avant ce correctif, une matière non composée disparaissait
-        purement et simplement du calcul (numérateur ET dénominateur), ce qui avantageait
-        artificiellement les étudiants absents à certaines matières au lieu de les pénaliser.
-        Query params requis : code_classe, code_periode.
+        Query params : code_classe (requis) + code_periode OU code_annee (bilan annuel).
+        mle_etudiant (optionnel) : ne renvoie que cet élève, son rang restant calculé
+        sur toute la classe.
         """
         code_classe  = request.query_params.get('code_classe')
         code_periode = request.query_params.get('code_periode')
-        if not code_classe or not code_periode:
+        code_annee   = request.query_params.get('code_annee')
+        mle_etudiant = request.query_params.get('mle_etudiant')
+        if not code_classe or not (code_periode or code_annee):
             return Response(
-                {'error': 'code_classe et code_periode sont requis.'},
+                {'error': 'code_classe et code_periode (ou code_annee) sont requis.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
-        qs = self.filter_queryset(self.get_queryset()).filter(
-            code_classe=code_classe, code_periode=code_periode,
-        ).select_related('mle_etudiant', 'code_matiere', 'code_type_eval', 'code_type_eval__remplace')
-
-        par_etudiant    = {}
-        matieres_notees = set()  # matières avec au moins une note numérique dans la classe
-        for e in qs:
-            etud = par_etudiant.setdefault(e.mle_etudiant_id, {
-                'mle_etudiant': e.mle_etudiant_id,
-                'nom_etudiant': str(e.mle_etudiant),
-                'matieres': {},
-            })
-            etud['matieres'].setdefault(e.code_matiere_id, {
-                'code_matiere': e.code_matiere_id,
-                'lib_matiere':  e.code_matiere.lib_matiere,
-                'evaluations':  [],
-            })['evaluations'].append(e)
-            if e.note is not None:
-                matieres_notees.add(e.code_matiere_id)
-
-        # Crédits LMD de chaque matière notée — poids neutre de 1 si aucun Cours
-        # correspondant n'est trouvé (ex: évaluation saisie sans attribution Cours).
-        code_annee = Periode.objects.filter(pk=code_periode).values_list('code_annee_id', flat=True).first()
-        credits_par_matiere = {}
-        if code_annee and matieres_notees:
-            rows = (
-                Cours.objects
-                .filter(code_classe=code_classe, code_annee=code_annee, code_matiere__in=matieres_notees)
-                .values('code_matiere').annotate(credits=Max('credits'))
-            )
-            credits_par_matiere = {r['code_matiere']: (r['credits'] or 1) for r in rows}
-
-        resultats = []
-        for data in par_etudiant.values():
-            matieres, moy_par_matiere = [], {}
-            for mat in data['matieres'].values():
-                moy = moyenne_ponderee(mat['evaluations'])
-                moy_par_matiere[mat['code_matiere']] = moy
-                # Évaluation par compétences (primaire réformé) : pas de note à moyenner,
-                # mais l'appréciation la plus récente (par ordre d'insertion) reste utile
-                # pour le relevé de classe. `moy` reste None dans ce cas (voir moyenne_ponderee).
-                avec_appreciation = [e for e in mat['evaluations'] if e.appreciation]
-                derniere_appreciation = avec_appreciation[-1].appreciation if avec_appreciation else None
-                matieres.append({
-                    'code_matiere': mat['code_matiere'],
-                    'lib_matiere':  mat['lib_matiere'],
-                    'moyenne':      moy,
-                    'appreciation': derniere_appreciation,
-                })
-
-            total_credits, total_points = 0, 0
-            for code_mat in matieres_notees:
-                credit = credits_par_matiere.get(code_mat, 1)
-                moy    = moy_par_matiere.get(code_mat) or 0  # non composée -> 0, pas ignorée
-                total_credits += credit
-                total_points  += moy * credit
-
-            resultats.append({
-                'mle_etudiant':     data['mle_etudiant'],
-                'nom_etudiant':     data['nom_etudiant'],
-                'matieres':         matieres,
-                'moyenne_generale': round(total_points / total_credits, 2) if total_credits else None,
-            })
-
+        # Les filtres de l'URL (code_periode, mle_etudiant…) ne doivent pas restreindre
+        # le calcul : le rang se calcule sur toute la classe et toutes ses séquences.
+        base = self.get_queryset()
+        try:
+            resultats = calculer_resultats(base, code_classe, code_periode=code_periode,
+                                           code_annee=code_annee)
+        except Periode.DoesNotExist:
+            return Response({'error': 'Période introuvable.'}, status=status.HTTP_404_NOT_FOUND)
+        if mle_etudiant:
+            resultats = [r for r in resultats if r['mle_etudiant'] == mle_etudiant]
         return Response(resultats)
 
 class FicheNotesViewSet(EtablissementFilterMixin, SMSBaseViewSet):
@@ -1805,60 +1737,21 @@ class FicheNotesViewSet(EtablissementFilterMixin, SMSBaseViewSet):
                    f'{created} notes importées depuis fiche {pk}')
         return Response({'imported': created, 'statut': fiche.statut})
 
-class FicheNotesDetailViewSet(SMSBaseViewSet):
+class FicheNotesDetailViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
+    etablissement_lookups = ('code_fiche__etablissement',)
     queryset         = FicheNotesDetail.objects.select_related('code_fiche', 'mle_etudiant').all()
     serializer_class = FicheNotesDetailSerializer
     filterset_fields = ['code_fiche', 'mle_etudiant', 'absent']
 
 
 # ── Planning & Rapports ───────────────────────────────────────────────────────
-class PlanningViewSet(SMSBaseViewSet):
+class PlanningViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
+    etablissement_lookups = ('code_cours__etablissement',)
     queryset         = Planning.objects.select_related(
         'code_cours__code_matiere', 'code_cours__code_classe',
         'code_cours__mle_ens', 'code_cours__code_annee',
         'code_jour', 'code_salle').all()
     serializer_class = PlanningSerializer
-
-    def get_queryset(self):
-        qs = Planning.objects.select_related(
-            'code_cours__code_matiere', 'code_cours__code_classe',
-            'code_cours__mle_ens', 'code_cours__code_annee',
-            'code_jour', 'code_salle').all()
-
-        # Filtre par type via X-Type-Etab (SUPER_ADMIN uniquement — voir mixins.py)
-        type_etab_id = trusted_type_etab_header(self.request)
-        if type_etab_id:
-            try:
-                from .models import Etablissement
-                etab_ids = list(Etablissement.objects.filter(
-                    code_type_id=type_etab_id
-                ).values_list('code_etab', flat=True))
-                if etab_ids:
-                    return qs.filter(code_cours__etablissement_id__in=etab_ids)
-                return qs.none()
-            except Exception:
-                pass
-
-        # Filtre par établissement (le sien pour un utilisateur normal, jamais un header spoofé)
-        etab_id = trusted_etablissement_header(self.request)
-        if etab_id:
-            return qs.filter(code_cours__etablissement_id=etab_id)
-
-        # Aucun établissement résolu : vue globale pour SUPER_ADMIN uniquement,
-        # refus par défaut pour tout autre rôle (pas de fuite vers un établissement arbitraire).
-        if is_super_admin(self.request):
-            try:
-                from .models import Etablissement
-                etab = Etablissement.objects.filter(actif=True).first()
-                if etab:
-                    return qs.filter(code_cours__etablissement_id=etab.code_etab)
-            except Exception:
-                pass
-            return qs
-        return qs.none()
-    filterset_fields = ['code_cours__code_classe', 'code_cours__mle_ens',
-                        'code_cours__code_annee', 'code_cours__semestre',
-                        'code_jour', 'type_planning', 'type_seance']
 
     @action(detail=False, methods=['get'], url_path='classe/(?P<code_classe>[^/.]+)')
     def par_classe(self, request, code_classe=None):
@@ -2074,7 +1967,8 @@ class PlanningViewSet(SMSBaseViewSet):
         )
         return Response({'created': created, 'skipped': skipped}, status=status.HTTP_201_CREATED)
 
-class RapportCoursViewSet(SMSBaseViewSet):
+class RapportCoursViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
+    etablissement_lookups = ('code_classe__etablissement',)
     queryset         = RapportCours.objects.select_related(
         'code_matiere', 'code_classe', 'code_rapport', 'mle_ens').all()
     serializer_class = RapportCoursSerializer
@@ -2159,7 +2053,8 @@ class SeanceViewSet(EtablissementFilterMixin, SMSBaseViewSet):
             ])
         return response
 
-class AbsenceViewSet(SMSBaseViewSet):
+class AbsenceViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
+    etablissement_lookups = ('mle_etudiant__etablissement',)
     queryset         = Absence.objects.select_related('code_seance', 'mle_etudiant').all()
     serializer_class = AbsenceSerializer
     search_fields    = ['mle_etudiant__nom']
@@ -2221,7 +2116,8 @@ class ExamenViewSet(EtablissementFilterMixin, SMSBaseViewSet):
                    f'{count} convocations générées pour {examen.lib_examen}')
         return Response({'generated': count})
 
-class ConvocationViewSet(SMSBaseViewSet):
+class ConvocationViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
+    etablissement_lookups = ('mle_etudiant__etablissement', 'code_examen__etablissement')
     queryset         = Convocation.objects.select_related(
         'mle_etudiant', 'mle_ens', 'code_examen').all()
     serializer_class = ConvocationSerializer
@@ -2572,6 +2468,43 @@ class DecisionViewSet(EtablissementFilterMixin, SMSBaseViewSet):
             qs = qs.filter(code_classe__code_sp=code_sp)
         return qs
 
+    ROLES_DELIBERATION = {'SUPER_ADMIN', 'ADMIN', 'SCOLARITE', 'CENSEUR'}
+
+    @action(detail=False, methods=['post'], url_path='generer')
+    def generer(self, request):
+        """
+        Délibération automatique d'une classe pour une année (voir notes.deliberer) :
+        crée ou met à jour la décision de chaque élève noté. Body : code_classe,
+        code_annee, session (NORMALE|RATTRAPAGE, défaut NORMALE), seuil (défaut 10).
+        """
+        from rest_framework.exceptions import PermissionDenied
+        profile = get_utilisateur_profile(request)
+        if not profile or profile.role not in self.ROLES_DELIBERATION:
+            raise PermissionDenied("Votre rôle ne vous autorise pas à générer les décisions.")
+
+        code_classe = request.data.get('code_classe')
+        code_annee  = request.data.get('code_annee')
+        session     = request.data.get('session') or 'NORMALE'
+        if not code_classe or not code_annee:
+            return Response({'error': 'code_classe et code_annee sont requis.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if session not in dict(Decision.SESSION_CHOICES):
+            return Response({'error': 'Session invalide.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            seuil = float(request.data.get('seuil', 10))
+        except (TypeError, ValueError):
+            return Response({'error': 'Seuil invalide.'}, status=status.HTTP_400_BAD_REQUEST)
+        # La classe doit être visible pour l'utilisateur (isolation multi-établissement).
+        if not _scoped_queryset(ClasseViewSet, request).filter(pk=code_classe).exists():
+            return Response({'error': 'Classe introuvable.'}, status=status.HTTP_404_NOT_FOUND)
+
+        evaluations = _scoped_queryset(EvaluationViewSet, request)
+        bilan = deliberer(evaluations, code_classe, code_annee, session=session, seuil=seuil)
+        log_action(request, 'CREATE', 'Decision', code_classe,
+                   f"Délibération {session} {code_annee} : {bilan['crees']} créées, "
+                   f"{bilan['mis_a_jour']} mises à jour")
+        return Response(bilan)
+
     @action(detail=False, methods=['get'], url_path='export-csv')
     def export_csv(self, request):
         qs = self.filter_queryset(self.get_queryset())
@@ -2592,7 +2525,8 @@ class DecisionViewSet(EtablissementFilterMixin, SMSBaseViewSet):
             ])
         return response
 
-class DiplomeViewSet(SMSBaseViewSet):
+class DiplomeViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
+    etablissement_lookups = ('mle_etudiant__etablissement',)
     queryset         = Diplome.objects.select_related('mle_etudiant').all()
     serializer_class = DiplomeSerializer
     search_fields    = ['lib_diplome', 'mle_etudiant__nom', 'numero_serie']
@@ -2645,19 +2579,22 @@ class StageViewSet(EtablissementFilterMixin, SMSBaseViewSet):
             ])
         return response
 
-class LettreAdmissionViewSet(SMSBaseViewSet):
+class LettreAdmissionViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
+    etablissement_lookups = ('mle_etudiant__etablissement',)
     queryset         = LettreAdmission.objects.select_related('mle_etudiant').all()
     serializer_class = LettreAdmissionSerializer
     search_fields    = ['mle_etudiant__nom']
     filterset_fields = ['type_lettre', 'code_annee', 'envoye_par_email']
 
-class BadgeAccesViewSet(SMSBaseViewSet):
+class BadgeAccesViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
+    etablissement_lookups = ('mle_etudiant__etablissement', 'mle_ens__etablissement')
     queryset         = BadgeAcces.objects.select_related('mle_etudiant', 'mle_ens').all()
     serializer_class = BadgeAccesSerializer
     search_fields    = ['numero_badge', 'mle_etudiant__nom']
     filterset_fields = ['type_porteur', 'statut']
 
-class DocumentGenereViewSet(SMSBaseViewSet):
+class DocumentGenereViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
+    etablissement_lookups = ('mle_etudiant__etablissement', 'code_classe__etablissement')
     queryset         = DocumentGenere.objects.select_related(
         'mle_etudiant', 'code_classe', 'code_annee').all()
     serializer_class = DocumentGenereSerializer
@@ -2671,6 +2608,140 @@ class NiveauScolaireViewSet(SMSBaseViewSet):
     serializer_class = NiveauScolaireSerializer
     filterset_fields = ['type_etab', 'systeme']
     search_fields    = ['lib_niveau', 'lib_en']
+
+class CoefficientMatiereViewSet(EtablissementFilterMixin, SMSBaseViewSet):
+    """
+    Grille des coefficients (primaire / secondaire) de l'établissement courant : un
+    coefficient par année, niveau, série et matière — voir CoefficientMatiere et
+    notes.coefficients_classe. Écriture réservée à la direction pédagogique.
+    """
+    queryset         = CoefficientMatiere.objects.select_related('code_matiere').all()
+    serializer_class = CoefficientMatiereSerializer
+    filterset_fields = ['code_annee', 'niveau_scolaire', 'serie', 'code_matiere']
+    ROLES_ECRITURE   = {'SUPER_ADMIN', 'ADMIN', 'SCOLARITE', 'CENSEUR'}
+
+    def check_permissions(self, request):
+        super().check_permissions(request)
+        if request.method not in ('GET', 'HEAD', 'OPTIONS'):
+            from rest_framework.exceptions import PermissionDenied
+            profile = get_utilisateur_profile(request)
+            if not profile or profile.role not in self.ROLES_ECRITURE:
+                raise PermissionDenied("Votre rôle ne vous autorise pas à modifier les coefficients.")
+
+    def _etablissement_courant(self):
+        """École courante (celle du compte, ou celle choisie par le SUPER_ADMIN)."""
+        from rest_framework.exceptions import ValidationError
+        etab_id = self.get_etablissement_id()
+        if not etab_id:
+            raise ValidationError({'error': 'Aucun établissement sélectionné.'})
+        if type_etab_courant(self.request) not in ('PRIMAIRE', 'SECONDAIRE'):
+            raise ValidationError({'error': "Les coefficients ne concernent que le primaire et le secondaire."})
+        return etab_id
+
+    @action(detail=False, methods=['get'], url_path='grille')
+    def grille(self, request):
+        """
+        Grille d'un niveau pour une année : séries en colonnes, matières en lignes.
+        Matières proposées : celles enseignées (Cours) dans les classes de ce niveau,
+        plus celles déjà présentes dans la grille. Query : code_annee, niveau_scolaire.
+        """
+        code_annee = request.query_params.get('code_annee')
+        niveau     = request.query_params.get('niveau_scolaire')
+        if not code_annee or not niveau:
+            return Response({'error': 'code_annee et niveau_scolaire sont requis.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        etab_id = self._etablissement_courant()
+        classes = Classe.objects.filter(etablissement_id=etab_id, niveau_scolaire_id=niveau)
+        enseignees = set(Cours.objects.filter(code_classe__in=classes, code_annee=code_annee)
+                         .values_list('code_matiere', flat=True))
+        lignes = CoefficientMatiere.objects.filter(
+            etablissement_id=etab_id, code_annee=code_annee, niveau_scolaire_id=niveau)
+        coefs = {}
+        for l in lignes:
+            coefs.setdefault(l.code_matiere_id, {})[l.serie] = l.coef
+        matieres = Matiere.objects.filter(code_matiere__in=enseignees | set(coefs)).order_by('lib_matiere')
+        return Response({
+            'series':   series_du_niveau(niveau),
+            'classes':  list(classes.order_by('lib_classe').values('code_classe', 'lib_classe', 'serie')),
+            'matieres': [{'code_matiere': m.code_matiere, 'lib_matiere': m.lib_matiere,
+                          'enseignee': m.code_matiere in enseignees,
+                          'coefs': coefs.get(m.code_matiere, {})} for m in matieres],
+        })
+
+    @action(detail=False, methods=['post'], url_path='enregistrer-grille')
+    def enregistrer_grille(self, request):
+        """
+        Enregistre la grille d'un niveau en une fois. Body : code_annee, niveau_scolaire,
+        lignes [{code_matiere, serie, coef}] — un coef vide supprime la case.
+        """
+        from django.db import transaction
+        code_annee = request.data.get('code_annee')
+        niveau     = request.data.get('niveau_scolaire')
+        lignes     = request.data.get('lignes') or []
+        if not code_annee or not niveau:
+            return Response({'error': 'code_annee et niveau_scolaire sont requis.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        etab_id = self._etablissement_courant()
+        series_valides = set(series_du_niveau(niveau))
+        erreurs, a_ecrire = [], []
+        for l in lignes:
+            serie = l.get('serie') or ''
+            coef  = l.get('coef')
+            if serie not in series_valides:
+                erreurs.append(f"Série {serie!r} invalide pour ce niveau.")
+                continue
+            if coef in (None, ''):
+                a_ecrire.append((l.get('code_matiere'), serie, None))
+                continue
+            try:
+                coef = int(coef)
+            except (TypeError, ValueError):
+                coef = 0
+            if not 1 <= coef <= 20:
+                erreurs.append(f"Coefficient invalide pour {l.get('code_matiere')} {serie} : entre 1 et 20.")
+                continue
+            a_ecrire.append((l.get('code_matiere'), serie, coef))
+        if erreurs:
+            return Response({'error': ' '.join(erreurs)}, status=status.HTTP_400_BAD_REQUEST)
+
+        crees = modifies = supprimes = 0
+        with transaction.atomic():
+            for code_matiere, serie, coef in a_ecrire:
+                cle = dict(etablissement_id=etab_id, code_annee_id=code_annee,
+                           niveau_scolaire_id=niveau, serie=serie, code_matiere_id=code_matiere)
+                if coef is None:
+                    supprimes += CoefficientMatiere.objects.filter(**cle).delete()[0]
+                    continue
+                _, cree = CoefficientMatiere.objects.update_or_create(**cle, defaults={'coef': coef})
+                crees += cree
+                modifies += not cree
+        log_action(request, 'UPDATE', 'CoefficientMatiere', niveau,
+                   f'Grille {niveau} {code_annee} : {crees} créés, {modifies} modifiés, {supprimes} supprimés')
+        return Response({'crees': crees, 'modifies': modifies, 'supprimes': supprimes})
+
+    @action(detail=False, methods=['post'], url_path='copier')
+    def copier(self, request):
+        """
+        Copie la grille d'une année vers une autre (ex : année précédente → nouvelle
+        année). Les cases déjà remplies dans l'année cible ne sont pas écrasées.
+        Body : source_annee, cible_annee.
+        """
+        source, cible = request.data.get('source_annee'), request.data.get('cible_annee')
+        if not source or not cible or source == cible:
+            return Response({'error': 'source_annee et cible_annee (différentes) sont requises.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        etab_id = self._etablissement_courant()
+        existantes = set(CoefficientMatiere.objects.filter(etablissement_id=etab_id, code_annee=cible)
+                         .values_list('niveau_scolaire', 'serie', 'code_matiere'))
+        nouvelles = [
+            CoefficientMatiere(etablissement_id=etab_id, code_annee_id=cible, niveau_scolaire_id=c.niveau_scolaire_id,
+                               serie=c.serie, code_matiere_id=c.code_matiere_id, coef=c.coef)
+            for c in CoefficientMatiere.objects.filter(etablissement_id=etab_id, code_annee=source)
+            if (c.niveau_scolaire_id, c.serie, c.code_matiere_id) not in existantes
+        ]
+        CoefficientMatiere.objects.bulk_create(nouvelles)
+        log_action(request, 'CREATE', 'CoefficientMatiere', cible, f'{len(nouvelles)} coefficients copiés depuis {source}')
+        return Response({'copies': len(nouvelles)})
 
 class ConfigBulletinViewSet(SMSBaseViewSet):
     queryset         = ConfigBulletin.objects.all()
@@ -2725,21 +2796,10 @@ class DashboardStatsView(APIView):
 
     def _etab_filter(self, request):
         """Réplique la logique de EtablissementFilterMixin pour les APIView simples."""
-        type_etab_id = trusted_type_etab_header(request) or None
-        if type_etab_id:
-            ids = list(
-                Etablissement.objects.filter(type_etab=type_etab_id)
-                .values_list('code_etab', flat=True)
-            )
-            return {'etablissement_id__in': ids} if ids else {'etablissement_id__in': []}
         etab_id = trusted_etablissement_header(request)
         if not etab_id:
-            if not is_super_admin(request):
-                # Rôle non SUPER_ADMIN sans établissement résolu : refus par défaut,
-                # jamais de repli sur "le premier établissement actif" (fuite inter-écoles).
-                return {'etablissement_id__in': []}
-            etab = Etablissement.objects.filter(actif=True).first()
-            etab_id = etab.code_etab if etab else None
+            # École indéterminée : refus par défaut, jamais de vue « toutes écoles ».
+            return {'etablissement_id__in': []}
         return {'etablissement_id': etab_id} if etab_id else {}
 
     def get(self, request):

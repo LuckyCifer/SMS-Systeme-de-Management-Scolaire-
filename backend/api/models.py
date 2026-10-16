@@ -9,6 +9,23 @@ from django.dispatch import receiver
 
 # Évaluation par compétences (primaire réformé) : remplace la notation /20 par une
 # appréciation. Utilisé en alternative au champ `note` sur Evaluation/FicheNotesDetail.
+# Séries du secondaire : le coefficient d'une matière dépend du niveau et de la série (ex :
+# l'Anglais pèse plus en série A qu'en série C) — voir CoefficientMatiere. En 4ème et 3ème,
+# la série est la troisième langue choisie en fin de 5ème ; 6ème et 5ème n'en ont pas.
+SERIE_CHOICES = [
+    ('ALLEMAND', 'Allemand'),
+    ('ESPAGNOL', 'Espagnol'),
+    ('LATIN',    'Latin'),
+    ('CHINOIS',  'Chinois'),
+    ('A',       'Série A'),
+    ('C',       'Série C'),
+    ('D',       'Série D'),
+    ('E',       'Série E'),
+    ('TI',      'Série TI'),
+    ('ARTS',    'Arts'),
+    ('SCIENCE', 'Science'),
+]
+
 APPRECIATION_CHOICES = [
     ('A',   'Acquis'),
     ('ECA', "En cours d'acquisition"),
@@ -32,6 +49,11 @@ class Batiment(models.Model):
     code_bat = models.CharField(max_length=5, primary_key=True)
     lib_bat  = models.CharField(max_length=25, null=True, blank=True)
     obs_bat  = models.CharField(max_length=45, null=True, blank=True)
+    # Isolation : chaque école a ses propres bâtiments (voir mixins.py).
+    etablissement = models.ForeignKey(
+        'Etablissement', on_delete=models.CASCADE, null=True, blank=True,
+        db_column='etablissement_id', related_name='+',
+    )
     class Meta:
         db_table = 'batiment'
     def __str__(self):
@@ -41,6 +63,11 @@ class Salle(models.Model):
     code_salle = models.CharField(max_length=5, primary_key=True)
     lib_salle  = models.CharField(max_length=15, null=True, blank=True)
     obs_salle  = models.CharField(max_length=45, default='')
+    # Isolation : chaque école a ses propres salles (voir mixins.py).
+    etablissement = models.ForeignKey(
+        'Etablissement', on_delete=models.CASCADE, null=True, blank=True,
+        db_column='etablissement_id', related_name='+',
+    )
     class Meta:
         db_table = 'salle'
     def __str__(self):
@@ -85,6 +112,11 @@ class Pension(models.Model):
     nb_tranche     = models.PositiveIntegerField(null=True, blank=True)
     mt_inscription = models.FloatField(default=0)
     type_etab      = models.CharField(max_length=20, null=True, blank=True, choices=TYPE_ETAB_CHOICES)
+    # Isolation : chaque école a ses propres pensions et frais de scolarité (voir mixins.py).
+    etablissement = models.ForeignKey(
+        'Etablissement', on_delete=models.CASCADE, null=True, blank=True,
+        db_column='etablissement_id', related_name='+',
+    )
     class Meta:
         db_table = 'pension'
     def __str__(self):
@@ -301,6 +333,11 @@ class Cycle(models.Model):
         Pension, on_delete=models.SET_NULL, null=True, blank=True, db_column='Code_pension'
     )
     type_etab    = models.CharField(max_length=20, null=True, blank=True, choices=TYPE_ETAB_CHOICES)
+    # Isolation : chaque école a ses propres cycles (voir mixins.py).
+    etablissement = models.ForeignKey(
+        'Etablissement', on_delete=models.CASCADE, null=True, blank=True,
+        db_column='etablissement_id', related_name='+',
+    )
     class Meta:
         db_table = 'cycle'
     def __str__(self):
@@ -326,6 +363,11 @@ class Niveau(models.Model):
         Annee, on_delete=models.SET_NULL, null=True, blank=True, db_column='code_annee'
     )
     type_etab    = models.CharField(max_length=20, null=True, blank=True, choices=TYPE_ETAB_CHOICES)
+    # Isolation : chaque école a ses propres niveaux internes (voir mixins.py).
+    etablissement = models.ForeignKey(
+        'Etablissement', on_delete=models.CASCADE, null=True, blank=True,
+        db_column='etablissement_id', related_name='+',
+    )
     class Meta:
         db_table = 'niveau'
     def __str__(self):
@@ -345,6 +387,10 @@ class Classe(models.Model):
     # l'établissement n'est pas bilingue : la classe suit alors simplement le système unique
     # de l'établissement, sans ambiguïté à lever.
     systeme = models.CharField(max_length=15, null=True, blank=True, choices=SYSTEME_CHOICES)
+    # Série de la classe : troisième langue en 4ème/3ème (« 4ème Espagnol »), série au
+    # second cycle (« 1ère A » → A). Vide en 6ème/5ème, où la lettre d'une classe
+    # (« 6ème A ») n'est qu'un numéro de groupe.
+    serie = models.CharField(max_length=10, null=True, blank=True, choices=SERIE_CHOICES)
     code_dep        = models.ForeignKey(
         Departement, on_delete=models.SET_NULL, null=True, blank=True, db_column='code_dep'
     )
@@ -537,6 +583,11 @@ class Tuteur(models.Model):
     email        = models.CharField(max_length=50, null=True, blank=True)
     adresse      = models.CharField(max_length=100, null=True, blank=True)
     created_at   = models.DateTimeField(auto_now_add=True)
+    # Isolation : chaque école a ses propres tuteurs (parents) (voir mixins.py).
+    etablissement = models.ForeignKey(
+        'Etablissement', on_delete=models.CASCADE, null=True, blank=True,
+        db_column='etablissement_id', related_name='+',
+    )
     class Meta:
         db_table = 'tuteur'
     def __str__(self):
@@ -685,6 +736,11 @@ class Frais(models.Model):
         Annee, on_delete=models.SET_NULL, null=True, blank=True, db_column='code_annee'
     )
     type_etab  = models.CharField(max_length=20, null=True, blank=True, choices=TYPE_ETAB_CHOICES)
+    # Isolation : chaque école a ses propres frais (voir mixins.py).
+    etablissement = models.ForeignKey(
+        'Etablissement', on_delete=models.CASCADE, null=True, blank=True,
+        db_column='etablissement_id', related_name='+',
+    )
     class Meta:
         db_table = 'frais'
     def __str__(self):
@@ -880,6 +936,11 @@ class RapportFinancier(models.Model):
     nb_etudiants_jour = models.PositiveIntegerField(default=0)
     genere_par        = models.CharField(max_length=50, null=True, blank=True)
     genere_le         = models.DateTimeField(auto_now_add=True)
+    # Isolation : chaque école a ses propres rapports financiers (voir mixins.py).
+    etablissement = models.ForeignKey(
+        'Etablissement', on_delete=models.CASCADE, null=True, blank=True,
+        db_column='etablissement_id', related_name='+',
+    )
     class Meta:
         db_table = 'rapport_financier'
     @property
@@ -921,10 +982,14 @@ class Qualification(models.Model):
         db_table = 'qualification'
 
 class Cours(models.Model):
-    """Attribution : matière enseignée à une classe pour un semestre donné."""
+    """Attribution : matière enseignée à une classe pour un semestre (supérieur) ou un
+    trimestre (primaire / secondaire — voir etabLabels.semestres côté frontend)."""
     SEMESTRE_CHOICES = [
         ('S1', 'Semestre 1'),
         ('S2', 'Semestre 2'),
+        ('T1', 'Trimestre 1'),
+        ('T2', 'Trimestre 2'),
+        ('T3', 'Trimestre 3'),
     ]
     code_matiere  = models.ForeignKey(Matiere,    on_delete=models.RESTRICT, db_column='code_matiere')
     code_classe   = models.ForeignKey(Classe,     on_delete=models.CASCADE,  db_column='code_classe')
@@ -937,6 +1002,13 @@ class Cours(models.Model):
                         help_text="Nombre total d'heures prévu sur le semestre (ex: 20h, 30h, 45h)")
     credits       = models.PositiveIntegerField(default=0,
                         help_text="Crédits LMD attribués à cette matière")
+    # Le poids d'une matière dans la moyenne générale est le coefficient de la grille
+    # (CoefficientMatiere) au primaire/secondaire, ces crédits LMD au supérieur.
+    # Supérieur : en dessous de cette moyenne, la matière ne peut pas être validée par
+    # compensation (voir notes.deliberer). Vide = pas de note éliminatoire.
+    note_elim     = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True,
+                        validators=[MinValueValidator(0), MaxValueValidator(20)],
+                        help_text="Note éliminatoire (supérieur) — bloque la compensation")
     groupes       = models.CharField(max_length=200, null=True, blank=True,
                         help_text="Groupes/spécialités concernés pour les cours tronc commun en amphi (ex: GI1, GL1, IA1)")
     etablissement = models.ForeignKey(
@@ -949,20 +1021,6 @@ class Cours(models.Model):
         ordering        = ['-code_annee', 'code_classe', 'code_matiere']
     def __str__(self):
         return f"{self.code_matiere} — {self.code_classe} — {self.semestre}"
-
-class UniteEnseignement(models.Model):
-    pk            = CompositePrimaryKey('code_matiere_id', 'code_classe_id')
-    code_matiere  = models.ForeignKey(Matiere,    on_delete=models.RESTRICT, db_column='code_matiere')
-    code_classe   = models.ForeignKey(Classe,     on_delete=models.CASCADE,  db_column='code_classe')
-    coef          = models.PositiveIntegerField(default=0)
-    duree_eval    = models.PositiveIntegerField(default=0)
-    nbh_total     = models.PositiveIntegerField(default=0)
-    mle_ens       = models.ForeignKey(Enseignant, on_delete=models.RESTRICT, db_column='mle_ens')
-    code_annee    = models.ForeignKey(Annee,      on_delete=models.RESTRICT, db_column='code_annee')
-    note_elim     = models.PositiveIntegerField(null=True, blank=True)
-    credits_ects  = models.PositiveIntegerField(default=3)
-    class Meta:
-        db_table = 'unite_enseignement'
 
 class Periode(models.Model):
     TYPE_ETAB_CHOICES = [
@@ -986,6 +1044,12 @@ class Periode(models.Model):
     code_annee   = models.ForeignKey(
         Annee, on_delete=models.RESTRICT, null=True, blank=True, db_column='code_annee'
     )
+    # Secondaire : une séquence appartient à un trimestre (6 séquences, 2 par trimestre).
+    # La moyenne du trimestre est la moyenne de ses séquences (voir notes.py).
+    periode_parent = models.ForeignKey(
+        'self', on_delete=models.CASCADE, null=True, blank=True,
+        db_column='periode_parent', related_name='sous_periodes',
+    )
     class Meta:
         db_table = 'periode'
     def __str__(self):
@@ -997,8 +1061,9 @@ class Evaluation(models.Model):
     code_matiere   = models.ForeignKey(Matiere,        on_delete=models.CASCADE,  db_column='code_matiere')
     code_classe    = models.ForeignKey(Classe,         on_delete=models.CASCADE,  db_column='code_classe')
     date_eval      = models.DateTimeField(null=True, blank=True)
-    # Nullable : une évaluation porte soit une note /20 (secondaire/supérieur), soit une
-    # appréciation par compétences (primaire réformé) — voir `appreciation` et clean().
+    # Primaire : la note /20 est accompagnée d'une appréciation A/ECA/NA déduite
+    # automatiquement de la note (voir save() et notes.appreciation_depuis_note).
+    # Une appréciation seule, sans note, reste acceptée (saisies historiques).
     note           = models.DecimalField(
         max_digits=5, decimal_places=2, null=True, blank=True,
         validators=[MinValueValidator(0), MaxValueValidator(20)],
@@ -1029,16 +1094,23 @@ class Evaluation(models.Model):
         from django.core.exceptions import ValidationError
         from .utils import check_event_date_bounds
         if self.note is None and not self.appreciation:
-            raise ValidationError("Une évaluation doit avoir soit une note, soit une appréciation (A/ECA/NA).")
-        if self.note is not None and self.appreciation:
-            raise ValidationError("Une évaluation ne peut pas avoir à la fois une note et une appréciation.")
+            raise ValidationError("Une évaluation doit avoir une note ou une appréciation (A/ECA/NA).")
         if self.date_eval and self.code_periode_id:
             annee = self.code_annee if self.code_annee_id else None
             erreur = check_event_date_bounds(self.date_eval, annee, self.code_periode)
             if erreur:
                 raise ValidationError({'date_eval': f"La date de l'évaluation est {erreur}."})
+    def save(self, *args, **kwargs):
+        from .notes import appreciation_depuis_note, type_etab_classe
+        # Primaire : l'appréciation suit toujours la note (00-09 NA, 10-14 ECA, 15-20 A).
+        # Ailleurs, une note n'est pas accompagnée d'appréciation.
+        if self.note is not None:
+            est_primaire = type_etab_classe(self.code_classe_id, self.etablissement_id) == 'PRIMAIRE'
+            self.appreciation = appreciation_depuis_note(self.note) if est_primaire else None
+        super().save(*args, **kwargs)
     def __str__(self):
-        return f"Eval {self.code_eval} — {self.appreciation or f'{self.note}/20'}"
+        parts = [f'{self.note}/20' if self.note is not None else None, self.appreciation]
+        return f"Eval {self.code_eval} — {' · '.join(p for p in parts if p)}"
 
 class FicheNotes(models.Model):
     STATUT_CHOICES = [
@@ -1723,6 +1795,11 @@ class AuditLog(models.Model):
     detail      = models.TextField(blank=True)
     ip_address  = models.GenericIPAddressField(null=True, blank=True)
     date_action = models.DateTimeField(auto_now_add=True)
+    # Isolation : chaque école a ses propres traces d'audit (conservées si l'école est supprimée) (voir mixins.py).
+    etablissement = models.ForeignKey(
+        'Etablissement', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='etablissement_id', related_name='+',
+    )
     class Meta:
         db_table            = 'audit_log'
         ordering            = ['-date_action']
@@ -1749,6 +1826,34 @@ class NiveauScolaire(models.Model):
 
     def __str__(self):
         return f"{self.lib_niveau} ({self.type_etab})"
+
+
+class CoefficientMatiere(models.Model):
+    """
+    Grille des coefficients (primaire / secondaire) : un coefficient par établissement,
+    année, niveau, série et matière. Toutes les classes de ce niveau et de cette série
+    (2nde A1, 2nde A2…) le partagent pour toute l'année ; une nouvelle année a sa propre
+    grille, ce qui ne modifie pas les bulletins des années passées.
+    `serie` vide = niveau sans série (premier cycle, primaire).
+    """
+    id              = models.AutoField(primary_key=True)
+    etablissement   = models.ForeignKey(
+        Etablissement, on_delete=models.CASCADE, db_column='etablissement_id', related_name='+',
+    )
+    code_annee      = models.ForeignKey(Annee, on_delete=models.CASCADE, db_column='code_annee')
+    niveau_scolaire = models.ForeignKey(NiveauScolaire, on_delete=models.CASCADE, db_column='niveau_scolaire')
+    serie           = models.CharField(max_length=10, blank=True, default='', choices=SERIE_CHOICES)
+    code_matiere    = models.ForeignKey(Matiere, on_delete=models.CASCADE, db_column='code_matiere')
+    coef            = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(20)])
+
+    class Meta:
+        db_table        = 'coefficient_matiere'
+        unique_together = (('etablissement', 'code_annee', 'niveau_scolaire', 'serie', 'code_matiere'),)
+        ordering        = ['niveau_scolaire', 'serie', 'code_matiere']
+
+    def __str__(self):
+        serie = f' {self.serie}' if self.serie else ''
+        return f'{self.niveau_scolaire_id}{serie} — {self.code_matiere_id} : coef {self.coef}'
 
 
 class ConfigBulletin(models.Model):

@@ -58,7 +58,11 @@ export const anneeService = {
   enCours:      ()  => api.get('/api/annees/en-cours/'),
   passageAnnee: ()  => api.post('/api/annees/passage-annee/'),
 };
-export const periodeService      = crud('/api/periodes');
+export const periodeService      = {
+  ...crud('/api/periodes'),
+  // Secondaire : crée les 6 séquences (2 par trimestre) de l'année.
+  genererSequences: (code_annee) => api.post('/api/periodes/generer-sequences/', { code_annee }),
+};
 export const matiereService      = crud('/api/matieres');
 export const moduleService       = crud('/api/modules');
 export const niveauService       = crud('/api/niveaux');
@@ -73,7 +77,6 @@ export const batimentService     = crud('/api/batiments');
 
 // ── Cours & UE ────────────────────────────────────────────────────────────────
 export const coursService        = crud('/api/cours');
-export const ueService           = crud('/api/unites-ens');
 export const qualificationService = crud('/api/qualifications');
 
 // ── Inscriptions ──────────────────────────────────────────────────────────────
@@ -85,9 +88,8 @@ export const inscriptionService  = {
 // ── Évaluations ───────────────────────────────────────────────────────────────
 export const evaluationService   = {
   ...crud('/api/evaluations'),
-  // Moyennes pondérées par étudiant/matière (Contrôle continu 30% + Session normale 70%, etc.
-  // — pondération configurée par type d'évaluation dans Paramétrage). Repli automatique sur
-  // une moyenne simple côté backend si aucune pondération n'est configurée.
+  // Moyennes, rangs et appréciations d'une classe, calculés côté backend (api/notes.py) :
+  // { code_classe, code_periode | code_annee, mle_etudiant? }. Seule source de ces calculs.
   moyennes: (params) => api.get('/api/evaluations/moyennes/', { params }),
 };
 
@@ -165,7 +167,11 @@ export const rapportAssiduiteService = {
 };
 
 // ── Décisions ─────────────────────────────────────────────────────────────────
-export const decisionService = crud('/api/decisions');
+export const decisionService = {
+  ...crud('/api/decisions'),
+  // Délibération automatique d'une classe : { code_classe, code_annee, session, seuil }.
+  generer: (data) => api.post('/api/decisions/generer/', data),
+};
 
 // ── Documents avancés ─────────────────────────────────────────────────────────
 export const diplomeService       = crud('/api/diplomes');
@@ -204,6 +210,13 @@ export const etablissementService = {
 
 // ── Niveaux scolaires & Config bulletin ───────────────────────────────────────
 export const niveauScolaireService  = crud('/api/niveaux-scolaires');
+// Grille des coefficients (primaire / secondaire) : année × niveau × série × matière.
+export const coefficientService = {
+  ...crud('/api/coefficients'),
+  grille:      (params) => api.get('/api/coefficients/grille/', { params }),
+  enregistrer: (data)   => api.post('/api/coefficients/enregistrer-grille/', data),
+  copier:      (data)   => api.post('/api/coefficients/copier/', data),
+};
 export const configBulletinService  = crud('/api/config-bulletin');
 
 // ── Import CSV ────────────────────────────────────────────────────────────────

@@ -34,12 +34,6 @@ export function notifyEtabUpdated() {
 export function connectToEtab(etabData) {
   localStorage.setItem(PINNED_KEY, etabData.code_etab);
   localStorage.setItem(CACHE_KEY, JSON.stringify({ data: etabData, ts: Date.now() }));
-  // Un établissement épinglé prime sur le filtre par type : un ancien type resté en cache
-  // (ex. 'PRIMAIRE' sélectionné avant de se connecter à un établissement SECONDAIRE) serait
-  // sinon toujours envoyé tel quel dans l'en-tête X-Type-Etab par l'intercepteur Axios, qui lit
-  // sms_type_etab_actif indépendamment de l'épinglage — et EtablissementFilterMixin donne la
-  // priorité à ce type sur X-Etablissement-Id, court-circuitant silencieusement l'épinglage.
-  localStorage.removeItem('sms_type_etab_actif');
   window.dispatchEvent(new CustomEvent(ETAB_CONNECT_EVENT));
 }
 

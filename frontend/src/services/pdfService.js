@@ -126,9 +126,11 @@ const exportSinglePage = async (el, filename, { scale = 2, widthMm = 210 } = {})
 };
 
 // ── Bulletin de notes ─────────────────────────────────────────────────────────
-export const generateBulletin = async (etudiant, evaluations, periode, etab, options = {}) => {
-  const { classMoyenne = null, rang = null, totalEleves = null, creditsMap = {} } = options;
-
+// `resultat` : ligne de l'élève renvoyée par /api/evaluations/moyennes/ (api/notes.py) —
+// moyennes par matière, poids (coefficient ou crédits), moyenne générale, rang, effectif,
+// moyenne de classe, appréciations du primaire. Aucun calcul de moyenne ici : le bulletin
+// affiche exactement les mêmes chiffres que les relevés et les délibérations.
+export const generateBulletin = async (etudiant, resultat, periode, etab) => {
   // Établissement (paramètre ou localStorage)
   const etabData   = etab || getEtabFromStorage();
   const logoBase64 = etabData?.logo ? await fetchPhotoBase64(etabData.logo) : null;
@@ -142,107 +144,89 @@ export const generateBulletin = async (etudiant, evaluations, periode, etab, opt
                    justify-content:center;border:1px solid #999;
                    background:#f9f9f9;font-size:10px;color:#aaa;">Photo</div>`;
 
-  const classeLib = etudiant?.lib_classe
-    || etudiant?.classe
-    || evaluations[0]?.lib_classe
-    || (typeof evaluations[0]?.code_classe === 'object' ? evaluations[0]?.code_classe?.lib_classe : null)
-    || '—';
-
+  const classeLib  = etudiant?.lib_classe || etudiant?.classe || '—';
   const nomComplet = [(etudiant?.nom || '').toUpperCase(), etudiant?.prenom || '']
-    .filter(Boolean).join(' ');
+    .filter(Boolean).join(' ') || resultat?.nom_etudiant || '—';
 
   const today    = new Date().toLocaleDateString('fr-FR');
   const heureStr = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-  const showCredits = Object.keys(creditsMap).length > 0;
   const typeEtabBulletin = etabData?.type_etab || 'SUPERIEUR';
   const chefSignatureBulletin = typeEtabBulletin === 'SUPERIEUR'
     ? `${getChefEtabLabel(typeEtabBulletin, 'signature')} des Études`
     : getChefEtabLabel(typeEtabBulletin, 'signature');
 
-  // Primaire réformé : évaluation par compétences (A/ECA/NA) — pas de notation chiffrée,
-  // donc ni moyenne, ni rang, ni mention numérique dans ce bulletin (voir doc de référence
-  // système éducatif camerounais). Détecté depuis l'établissement, pas depuis les données,
-  // pour rester cohérent même si un étudiant primaire n'a encore aucune évaluation saisie.
+  // Primaire : chaque moyenne /20 est accompagnée de son appréciation A/ECA/NA.
+  // Pré-bac : coefficients et points (moyenne × coef) ; supérieur : crédits LMD.
   const isPrimaire = typeEtabBulletin === 'PRIMAIRE';
+  const isPreBac   = typeEtabBulletin !== 'SUPERIEUR';
+  const poidsLabel = isPreBac ? 'Coef.' : 'Crédits';
   const APPRECIATION_LABEL = { A: 'Acquis', ECA: "En cours d'acquisition", NA: 'Non acquis' };
   const APPRECIATION_COLOR = { A: '#1b5e20', ECA: '#e65100', NA: '#b71c1c' };
+  const fmt = v => (v === null || v === undefined) ? '—' : Number(v).toFixed(2);
+  const mentionMatiere = moy => moy >= 16 ? 'Très Bien' : moy >= 14 ? 'Bien' : moy >= 12 ? 'Assez Bien' : moy >= 10 ? 'Passable' : 'Insuffisant';
 
-  // Regroupement par matière — conserve les évaluations (note ou appréciation) dans l'ordre.
-  const matieres = {};
-  evaluations.forEach(e => {
-    const lib = e.lib_matiere || e.code_matiere?.lib_matiere || 'Matière';
-    if (!matieres[lib]) matieres[lib] = [];
-    matieres[lib].push(e);
-  });
+  const matieres = resultat?.matieres || [];
+  const moyenneGenerale = resultat?.moyenne_generale ?? null;
+  const rang        = resultat?.rang ?? null;
+  const totalEleves = resultat?.effectif ?? null;
+  const classMoyenne = resultat?.moyenne_classe ?? null;
+  const rangTexte = rang !== null
+    ? `${rang}<sup>${rang === 1 ? 'er' : 'e'}</sup>${resultat?.ex_aequo ? ' ex æquo' : ''}${totalEleves ? ' / ' + totalEleves : ''}`
+    : null;
 
-  const moyenneGenerale = (!isPrimaire && evaluations.length > 0)
-    ? (evaluations.reduce((s, e) => s + parseFloat(e.note), 0) / evaluations.length).toFixed(2)
+  const appreciationHtml = (appre, taille = 11) => appre
+    ? `<span style="font-weight:700;color:${APPRECIATION_COLOR[appre]};font-size:${taille}px;">${appre}</span>
+       <span style="color:${APPRECIATION_COLOR[appre]};font-size:${taille - 1}px;"> — ${APPRECIATION_LABEL[appre]}</span>`
     : '—';
 
-  // Répartition A/ECA/NA (primaire) — l'appréciation la plus récente sert de bilan par
-  // matière, mais le résumé global porte sur toutes les évaluations de la période.
-  const repartition = { A: 0, ECA: 0, NA: 0 };
-  if (isPrimaire) {
-    evaluations.forEach(e => { if (e.appreciation) repartition[e.appreciation]++; });
-  }
-
-  const lignesMatieres = Object.entries(matieres).map(([mat, evals], i) => {
-    const bg = i % 2 === 0 ? '#fff' : '#f9f9f9';
-    if (isPrimaire) {
-      // Appréciation la plus récente (par date d'évaluation) pour cette matière.
-      const derniere = [...evals].sort((a, b) => (a.date_eval || '').localeCompare(b.date_eval || ''))
-        .at(-1);
-      const appre = derniere?.appreciation || null;
-      const color = appre ? APPRECIATION_COLOR[appre] : '#999';
-      return `
-        <tr style="background:${bg};border-bottom:1px solid #eee;">
-          <td style="padding:5px 9px;font-size:11px;">${mat}</td>
-          <td style="padding:5px 9px;text-align:center;color:#777;font-size:11px;">${evals.length}</td>
-          <td style="padding:5px 9px;text-align:center;font-weight:700;color:${color};font-size:12px;">${appre || '—'}</td>
-          <td style="padding:5px 9px;text-align:center;color:${color};font-size:11px;">${appre ? APPRECIATION_LABEL[appre] : '—'}</td>
-        </tr>`;
-    }
-    const notes   = evals.map(e => parseFloat(e.note));
-    const moy     = (notes.reduce((a, b) => a + b, 0) / notes.length).toFixed(2);
-    const appre   = moy >= 16 ? 'Très Bien' : moy >= 14 ? 'Bien' : moy >= 12 ? 'Assez Bien' : moy >= 10 ? 'Passable' : 'Insuffisant';
-    const color   = moy >= 10 ? '#1b5e20' : '#b71c1c';
-    const credits = creditsMap[mat] != null ? creditsMap[mat] : '—';
+  const lignesMatieres = matieres.map((m, i) => {
+    const bg    = i % 2 === 0 ? '#fff' : '#f9f9f9';
+    const moy   = m.moyenne;
+    const color = moy === null ? '#999' : moy >= 10 ? '#1b5e20' : '#b71c1c';
+    const points = (isPreBac && moy !== null && m.poids) ? (moy * m.poids).toFixed(2) : '—';
     return `
       <tr style="background:${bg};border-bottom:1px solid #eee;">
-        <td style="padding:5px 9px;font-size:11px;">${mat}</td>
-        <td style="padding:5px 9px;text-align:center;color:#777;font-size:11px;">${notes.length}</td>
-        ${showCredits ? `<td style="padding:5px 9px;text-align:center;color:#555;font-size:11px;">${credits}</td>` : ''}
-        <td style="padding:5px 9px;text-align:center;font-weight:700;color:${color};font-size:12px;">${moy}/20</td>
-        <td style="padding:5px 9px;text-align:center;color:${color};font-size:11px;">${appre}</td>
+        <td style="padding:5px 9px;font-size:11px;">${m.lib_matiere}</td>
+        <td style="padding:5px 9px;text-align:center;color:#777;font-size:11px;">${m.nb_evals ?? '—'}</td>
+        <td style="padding:5px 9px;text-align:center;color:#555;font-size:11px;">${m.poids ?? '—'}</td>
+        <td style="padding:5px 9px;text-align:center;font-weight:700;color:${color};font-size:12px;">${moy !== null ? fmt(moy) + '/20' : '—'}</td>
+        ${isPreBac ? `<td style="padding:5px 9px;text-align:center;color:#555;font-size:11px;">${points}</td>` : ''}
+        <td style="padding:5px 9px;text-align:center;font-size:11px;color:${color};">
+          ${isPrimaire ? appreciationHtml(m.appreciation) : (moy !== null ? mentionMatiere(moy) : '—')}
+        </td>
       </tr>`;
   }).join('');
 
-  // Rang / moyenne de classe : sans objet en évaluation par compétences (pas de notation
-  // chiffrée à classer) — ignorés même si transmis par appel précédent.
-  const rangHtml = (!isPrimaire && rang !== null && totalEleves !== null)
-    ? `<div style="background:#1a3c5e;color:#fff;padding:8px 16px;border-radius:6px;
-                   text-align:center;min-width:110px;">
-         <div style="font-size:10px;opacity:.8;text-transform:uppercase;letter-spacing:1px;">Rang</div>
-         <div style="font-size:20px;font-weight:700;margin-top:1px;">${rang}<sup style="font-size:11px;vertical-align:super;opacity:.8;">e</sup><span style="font-size:13px;opacity:.7;">/${totalEleves}</span></div>
-       </div>` : '';
+  // Ligne des totaux (pré-bac) : Σ coefficients et Σ points, comme sur les bulletins officiels.
+  const totauxHtml = (isPreBac && resultat?.total_poids) ? `
+      <tr style="background:#e8f5e9;font-weight:700;border-top:2px solid #2e7d32;">
+        <td style="padding:6px 9px;font-size:11px;" colspan="2">TOTAUX</td>
+        <td style="padding:6px 9px;text-align:center;font-size:11px;">${resultat.total_poids}</td>
+        <td style="padding:6px 9px;text-align:center;font-size:11px;"></td>
+        <td style="padding:6px 9px;text-align:center;font-size:11px;">${fmt(resultat.total_points)}</td>
+        <td style="padding:6px 9px;"></td>
+      </tr>` : '';
 
-  const classMoyHtml = (!isPrimaire && classMoyenne !== null)
-    ? `<div style="background:#e8f5e9;border:1px solid #a5d6a7;padding:8px 16px;
-                   border-radius:6px;text-align:center;min-width:130px;">
-         <div style="font-size:10px;color:#2e7d32;text-transform:uppercase;letter-spacing:1px;">Moy. classe</div>
-         <div style="font-size:18px;font-weight:700;color:#2e7d32;margin-top:1px;">${classMoyenne}/20</div>
-       </div>` : '';
+  const rangHtml = rangTexte ? `
+    <div style="background:#1a3c5e;color:#fff;padding:8px 16px;border-radius:6px;
+                text-align:center;min-width:110px;">
+      <div style="font-size:10px;opacity:.8;text-transform:uppercase;letter-spacing:1px;">Rang</div>
+      <div style="font-size:18px;font-weight:700;margin-top:1px;">${rangTexte}</div>
+    </div>` : '';
 
-  // Bilan global (primaire) : répartition A/ECA/NA à la place du bloc "Ma moyenne".
-  const bilanCompetencesHtml = isPrimaire
-    ? `<div style="background:#1a3c5e;color:#fff;padding:8px 18px;border-radius:6px;
-                   text-align:center;min-width:200px;display:flex;gap:14px;align-items:center;">
-         ${['A', 'ECA', 'NA'].map(a => `
-           <div>
-             <div style="font-size:9px;opacity:.8;text-transform:uppercase;letter-spacing:1px;">${a}</div>
-             <div style="font-size:18px;font-weight:700;margin-top:1px;">${repartition[a]}</div>
-           </div>`).join('')}
-       </div>` : '';
+  const classMoyHtml = classMoyenne !== null ? `
+    <div style="background:#e8f5e9;border:1px solid #a5d6a7;padding:8px 16px;
+                border-radius:6px;text-align:center;min-width:130px;">
+      <div style="font-size:10px;color:#2e7d32;text-transform:uppercase;letter-spacing:1px;">Moy. classe</div>
+      <div style="font-size:18px;font-weight:700;color:#2e7d32;margin-top:1px;">${fmt(classMoyenne)}/20</div>
+    </div>` : '';
+
+  const appreciationGeneraleHtml = (isPrimaire && resultat?.appreciation_generale) ? `
+    <div style="background:#fff;border:2px solid ${APPRECIATION_COLOR[resultat.appreciation_generale]};
+                padding:8px 16px;border-radius:6px;text-align:center;min-width:150px;">
+      <div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:1px;">Appréciation</div>
+      <div style="margin-top:3px;">${appreciationHtml(resultat.appreciation_generale, 14)}</div>
+    </div>` : '';
 
   const periodeLabel = periode || `${new Date().getFullYear()}/${new Date().getFullYear() + 1}`;
 
@@ -250,53 +234,54 @@ export const generateBulletin = async (etudiant, evaluations, periode, etab, opt
     <div style="font-family:Arial,sans-serif;padding:12px 16px;color:#111;
                 max-width:700px;margin:0 auto;box-sizing:border-box;">
 
-      ${buildEtabHeader(etabData, logoBase64, `${isPrimaire ? "BULLETIN D'ÉVALUATION" : 'BULLETIN DE NOTES'} — ${periodeLabel}`, '#2e7d32')}
+      ${buildEtabHeader(etabData, logoBase64, `BULLETIN DE NOTES — ${periodeLabel}`, '#2e7d32')}
 
-      <!-- Infos étudiant -->
+      <!-- Infos élève -->
       <div style="display:flex;align-items:flex-start;gap:12px;
                   background:#f5f5f5;padding:8px 12px;border-radius:6px;
                   margin-bottom:10px;border-left:4px solid #2e7d32;">
         <div style="flex:1;">
           <div style="font-size:10px;color:#888;text-transform:uppercase;margin-bottom:2px;">Élève</div>
           <div style="font-size:14px;font-weight:700;">${nomComplet}</div>
-          <div style="font-size:11px;color:#666;">Matricule : ${etudiant?.mle_etudiant || '—'}</div>
-          ${!isPrimaire ? `<div style="font-size:11px;color:#2e7d32;font-weight:600;margin-top:3px;">
-            Moyenne : ${moyenneGenerale}/20
-          </div>` : ''}
+          <div style="font-size:11px;color:#666;">Matricule : ${etudiant?.mle_etudiant || resultat?.mle_etudiant || '—'}</div>
+          <div style="font-size:11px;color:#2e7d32;font-weight:600;margin-top:3px;">
+            Moyenne : ${fmt(moyenneGenerale)}/20${isPrimaire && resultat?.appreciation_generale ? ` (${resultat.appreciation_generale})` : ''}
+          </div>
         </div>
         <div style="text-align:right;flex:1;">
           <div style="font-size:10px;color:#888;text-transform:uppercase;margin-bottom:2px;">Classe</div>
           <div style="font-size:13px;font-weight:700;">${classeLib}</div>
           <div style="font-size:11px;color:#666;">Date : ${today}</div>
-          ${(!isPrimaire && rang !== null) ? `<div style="font-size:11px;color:#1a3c5e;font-weight:600;margin-top:3px;">Rang : ${rang}<sup>e</sup>${totalEleves ? '/' + totalEleves : ''}</div>` : ''}
+          ${rangTexte ? `<div style="font-size:11px;color:#1a3c5e;font-weight:600;margin-top:3px;">Rang : ${rangTexte}</div>` : ''}
         </div>
         <div style="flex-shrink:0;">${photoHtml}</div>
       </div>
 
-      <!-- Tableau des évaluations -->
+      <!-- Tableau des matières -->
       <table style="width:100%;border-collapse:collapse;margin-bottom:10px;">
         <thead>
           <tr style="background:#2e7d32;color:#fff;">
             <th style="padding:7px 9px;text-align:left;font-size:11px;">Matière</th>
             <th style="padding:7px 9px;text-align:center;font-size:11px;">Nb éval.</th>
-            ${(showCredits && !isPrimaire) ? '<th style="padding:7px 9px;text-align:center;font-size:11px;">Crédits</th>' : ''}
-            <th style="padding:7px 9px;text-align:center;font-size:11px;">${isPrimaire ? 'Compétence' : 'Moy. matière'}</th>
+            <th style="padding:7px 9px;text-align:center;font-size:11px;">${poidsLabel}</th>
+            <th style="padding:7px 9px;text-align:center;font-size:11px;">Moyenne</th>
+            ${isPreBac ? '<th style="padding:7px 9px;text-align:center;font-size:11px;">Points</th>' : ''}
             <th style="padding:7px 9px;text-align:center;font-size:11px;">Appréciation</th>
           </tr>
         </thead>
-        <tbody>${lignesMatieres}</tbody>
+        <tbody>${lignesMatieres}${totauxHtml}</tbody>
       </table>
 
       <!-- Statistiques -->
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-bottom:12px;align-items:stretch;">
         ${classMoyHtml}
         ${rangHtml}
-        ${isPrimaire ? bilanCompetencesHtml : `
+        ${appreciationGeneraleHtml}
         <div style="background:#2e7d32;color:#fff;padding:8px 18px;
                     border-radius:6px;text-align:center;min-width:130px;">
           <div style="font-size:10px;opacity:.85;text-transform:uppercase;letter-spacing:1px;">Ma moyenne</div>
-          <div style="font-size:22px;font-weight:700;margin-top:2px;">${moyenneGenerale}/20</div>
-        </div>`}
+          <div style="font-size:22px;font-weight:700;margin-top:2px;">${fmt(moyenneGenerale)}/20</div>
+        </div>
       </div>
 
       <!-- Signature -->
@@ -315,7 +300,7 @@ export const generateBulletin = async (etudiant, evaluations, periode, etab, opt
   const el = document.createElement('div');
   el.innerHTML = html;
   document.body.appendChild(el);
-  const result = await exportSinglePage(el, `bulletin_${etudiant?.mle_etudiant || 'etudiant'}.pdf`, { scale: 1.5 });
+  const result = await exportSinglePage(el, `bulletin_${etudiant?.mle_etudiant || resultat?.mle_etudiant || 'eleve'}.pdf`, { scale: 1.5 });
   document.body.removeChild(el);
   return result;
 };

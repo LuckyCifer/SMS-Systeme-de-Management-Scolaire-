@@ -14,13 +14,13 @@ from .models import (
     Personnel,
     Tranche, Frais, Inscription, FraisInscription, Paiement, PaiementSalaire, Moratoire,
     Facture, FactureDetail, RapportFinancier,
-    Matiere, Qualification, Cours, UniteEnseignement, Periode, Evaluation,
+    Matiere, Qualification, Cours, Periode, Evaluation,
     FicheNotes, FicheNotesDetail,
     Planning, RapportCours, Seance, Absence,
     Examen, Epreuve, Convocation, RapportStatistique, RapportAssiduite,
     Decision, Diplome, CarteEtudiant, Stage, LettreAdmission,
     BadgeAcces, DocumentGenere, AuditLog,
-    NiveauScolaire, ConfigBulletin,
+    NiveauScolaire, ConfigBulletin, CoefficientMatiere,
 )
 
 
@@ -591,19 +591,27 @@ class CoursSerializer(serializers.ModelSerializer):
         model = Cours
         fields = '__all__'
 
-class UniteEnseignementSerializer(serializers.ModelSerializer):
-    lib_matiere = serializers.CharField(source='code_matiere.lib_matiere', read_only=True)
-    lib_classe  = serializers.CharField(source='code_classe.lib_classe',   read_only=True)
-    nom_ens     = serializers.CharField(source='mle_ens.nom_ens',          read_only=True)
-    class Meta:
-        model = UniteEnseignement
-        fields = '__all__'
-
 class PeriodeSerializer(serializers.ModelSerializer):
-    lib_annee = serializers.CharField(source='code_annee.lib_annee', read_only=True)
+    lib_annee  = serializers.CharField(source='code_annee.lib_annee', read_only=True)
+    lib_parent = serializers.CharField(source='periode_parent.lib_periode', read_only=True, default=None)
     class Meta:
         model = Periode
         fields = '__all__'
+
+    def validate(self, data):
+        # Un seul niveau d'imbrication (trimestre → séquences), dans la même année.
+        get = lambda field: data.get(field, getattr(self.instance, field, None))
+        parent = get('periode_parent')
+        if parent is not None:
+            if self.instance is not None and parent.pk == self.instance.pk:
+                raise serializers.ValidationError({'periode_parent': "Une période ne peut pas être son propre parent."})
+            if parent.periode_parent_id is not None:
+                raise serializers.ValidationError({'periode_parent': "Le parent doit être un trimestre, pas une séquence."})
+            if self.instance is not None and self.instance.sous_periodes.exists():
+                raise serializers.ValidationError({'periode_parent': "Cette période a déjà des séquences : elle ne peut pas devenir une séquence."})
+            if get('code_annee') and parent.code_annee_id and parent.code_annee_id != get('code_annee').pk:
+                raise serializers.ValidationError({'periode_parent': "La séquence et son trimestre doivent être dans la même année."})
+        return data
 
 class EvaluationSerializer(serializers.ModelSerializer):
     nom_etudiant    = serializers.CharField(source='mle_etudiant.nom',              read_only=True)
@@ -911,6 +919,13 @@ class NiveauScolaireSerializer(serializers.ModelSerializer):
     class Meta:
         model  = NiveauScolaire
         fields = '__all__'
+
+class CoefficientMatiereSerializer(serializers.ModelSerializer):
+    lib_matiere = serializers.CharField(source='code_matiere.lib_matiere', read_only=True)
+    class Meta:
+        model  = CoefficientMatiere
+        fields = '__all__'
+        read_only_fields = ['etablissement']
 
 class ConfigBulletinSerializer(serializers.ModelSerializer):
     class Meta:

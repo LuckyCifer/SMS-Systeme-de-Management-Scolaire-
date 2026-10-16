@@ -16,7 +16,7 @@ const noteColor = n => {
   return 'badge-danger';
 };
 
-// Évaluation par compétences (primaire réformé) : A/ECA/NA au lieu d'une note /20.
+// Appréciations du primaire (A/ECA/NA), affichées à côté de la note /20.
 const APPRECIATION_COLOR = { A: 'badge-success', ECA: 'badge-warning', NA: 'badge-danger' };
 
 function Form({ item, onClose, onSave }) {
@@ -115,10 +115,11 @@ export default function Evaluation() {
     { key:'cls',   label: t.fields.classe,   render: r => r.lib_classe || r.code_classe },
     { key:'type',  label: t.fields.type,     render: r => r.lib_type_eval || r.code_type_eval?.lib_type_eval || '—' },
     { key:'date',  label: t.fields.date,     render: r => r.date_eval?.slice(0,10) || '—' },
-    { key:'note',  label: t.fields.note, searchValue: r => r.appreciation || r.note, render: r =>
-        r.appreciation
-          ? <span className={`sms-badge ${APPRECIATION_COLOR[r.appreciation] || 'badge-secondary'}`}>{r.appreciation}</span>
-          : <span className={`sms-badge ${noteColor(r.note)}`}>{r.note}/20</span>
+    // Primaire : la note /20 est accompagnée de son appréciation A/ECA/NA.
+    { key:'note',  label: t.fields.note, searchValue: r => `${r.note ?? ''} ${r.appreciation ?? ''}`, render: r => <>
+        {r.note !== null && r.note !== undefined && <span className={`sms-badge ${noteColor(r.note)}`}>{r.note}/20</span>}
+        {r.appreciation && <> <span className={`sms-badge ${APPRECIATION_COLOR[r.appreciation] || 'badge-secondary'}`}>{r.appreciation}</span></>}
+      </>
     },
   ];
 

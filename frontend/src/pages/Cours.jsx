@@ -22,6 +22,7 @@ export function CoursForm({ item, onClose, onSave, labels }) {
     code_annee:    item?.code_annee    || '',
     quota_horaire: item?.quota_horaire ?? 20,
     credits:       item?.credits       ?? 0,
+    note_elim:     item?.note_elim     ?? '',
     groupes:       item?.groupes       || '',
   });
   const ch = e => setF(prev => ({ ...prev, [e.target.name]: e.target.value }));
@@ -34,7 +35,7 @@ export function CoursForm({ item, onClose, onSave, labels }) {
   return (
     <form onSubmit={e => {
       e.preventDefault();
-      onSave({ ...f, mle_ens: f.mle_ens || null });
+      onSave({ ...f, mle_ens: f.mle_ens || null, note_elim: f.note_elim === '' ? null : f.note_elim });
     }}>
       <div className="sms-form-row">
         <FormField
@@ -85,7 +86,8 @@ export function CoursForm({ item, onClose, onSave, labels }) {
           label={t.fields.quota} name="quota_horaire" type="number"
           value={f.quota_horaire} onChange={ch} required placeholder="Ex : 30"
         />
-        {/* Crédits ECTS — supérieur uniquement */}
+        {/* Poids dans la moyenne générale : crédits ECTS au supérieur ; au primaire et
+            au secondaire, coefficient de la grille (page Coefficients). */}
         {labels.showCredits && (
           <FormField
             label={t.fields.credits} name="credits" type="number"
@@ -93,6 +95,19 @@ export function CoursForm({ item, onClose, onSave, labels }) {
           />
         )}
       </div>
+      {!labels.showCredits && (
+        <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '0 0 10px' }}>
+          <i className="fas fa-info-circle"></i> Le coefficient de la matière se règle par niveau et par série
+          dans la page <strong>Coefficients</strong>.
+        </p>
+      )}
+      {/* Note éliminatoire — supérieur : en dessous, pas de validation par compensation */}
+      {labels.isSuperieur && (
+        <FormField
+          label="Note éliminatoire (/20)" name="note_elim" type="number"
+          value={f.note_elim} onChange={ch} placeholder="Vide = aucune (ex : 7)"
+        />
+      )}
 
       {/* Groupes / Amphi — supérieur uniquement */}
       {labels.showGroupes && (
@@ -188,9 +203,11 @@ export default function Cours() {
     )},
     { key: 'ann', label: t.common.colYear,     render: r => r.lib_annee || r.code_annee || '—' },
     { key: 'qh',  label: t.pages.courses.quotaCol, render: r => r.quota_horaire ?? '—' },
-    // Crédits — supérieur uniquement
+    // Poids : crédits et note éliminatoire (supérieur) ; coefficients dans Paramétrage
     ...(labels.showCredits ? [{
       key: 'cr', label: t.fields.credits, render: r => r.credits ?? '—',
+    }, {
+      key: 'elim', label: 'Note élim.', render: r => r.note_elim ?? '—',
     }] : []),
     // Groupes amphi — supérieur uniquement
     ...(labels.showGroupes ? [{

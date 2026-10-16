@@ -53,25 +53,14 @@ api.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`;
     }
 
-    // Injecte l'établissement courant pour l'isolation des données
+    // École courante : pris en compte par le serveur pour le SUPER_ADMIN seulement (les
+    // autres comptes sont toujours limités à leur propre école, quel que soit l'en-tête).
     try {
       const raw = localStorage.getItem('sms_etab');
       if (raw) {
         const { data } = JSON.parse(raw);
         if (data?.code_etab) {
           config.headers['X-Etablissement-Id'] = data.code_etab;
-        }
-      }
-    } catch {}
-
-    // SUPER_ADMIN : injecte le type actif (PRIMAIRE/SECONDAIRE/SUPERIEUR) pour le filtrage
-    try {
-      const userRaw  = localStorage.getItem('sms_user');
-      const userRole = userRaw ? JSON.parse(userRaw)?.role : null;
-      if (userRole === 'SUPER_ADMIN') {
-        const typeActif = localStorage.getItem('sms_type_etab_actif');
-        if (typeActif) {
-          config.headers['X-Type-Etab'] = typeActif;
         }
       }
     } catch {}

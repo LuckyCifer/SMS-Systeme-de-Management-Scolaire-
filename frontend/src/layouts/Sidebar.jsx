@@ -48,6 +48,7 @@ export default function Sidebar({ collapsed }) {
         { to:'/classes',   page:'classes',   label:labels.classeLabel,  icon:'fas fa-door-open' },
         { to:'/cours',     page:'cours',     label:t.nav.courses,       icon:'fas fa-book-open' },
         { to:'/matieres',  page:'cours',     label:t.nav.matieres,      icon:'fas fa-book' },
+        { to:'/coefficients', page:'coefficients', label:'Coefficients', icon:'fas fa-balance-scale', hideFor:['SUPERIEUR'] },
         { to:'/stages',    page:'students',  label:t.nav.stages,        icon:'fas fa-briefcase',   hideFor:['PRIMAIRE', 'SECONDAIRE'] },
         { to:'/cartes',    page:'students',  label:t.nav.cartes,        icon:'fas fa-id-card',     hideFor:['PRIMAIRE'] },
       ],

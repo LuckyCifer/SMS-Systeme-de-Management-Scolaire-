@@ -217,8 +217,8 @@ class MoyenneGeneralePondereeParCreditsTest(TestCase):
 
 class AppreciationCompetencesTest(TestCase):
     """
-    Évaluation par compétences (primaire réformé) : une Evaluation porte soit une note /20,
-    soit une appréciation A/ECA/NA — jamais les deux, jamais aucune des deux (clean()).
+    Une Evaluation porte une note /20, une appréciation A/ECA/NA, ou les deux (primaire) —
+    jamais aucune des deux (clean()).
     """
     def setUp(self):
         self.periode = Periode.objects.create(lib_periode='Trimestre 1')
@@ -255,13 +255,13 @@ class AppreciationCompetencesTest(TestCase):
         with self.assertRaises(ValidationError):
             e.full_clean()
 
-    def test_note_et_appreciation_a_la_fois_refuse(self):
+    def test_note_et_appreciation_a_la_fois_acceptees(self):
+        # Primaire : la note /20 est désormais accompagnée de son appréciation.
         e = Evaluation(
             mle_etudiant=self.etudiant, code_matiere=self.matiere, code_classe=self.classe,
-            code_periode=self.periode, code_type_eval=self.type_eval, note=14, appreciation='A',
+            code_periode=self.periode, code_type_eval=self.type_eval, note=14, appreciation='ECA',
         )
-        with self.assertRaises(ValidationError):
-            e.full_clean()
+        e.full_clean()  # ne doit pas lever
 
     def test_moyenne_ponderee_ignore_les_appreciations(self):
         # Une évaluation par appréciation ne doit pas polluer le calcul de moyenne numérique.

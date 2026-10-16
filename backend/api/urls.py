@@ -59,7 +59,6 @@ router.register(r'rapports-financiers', views.RapportFinancierViewSet, basename=
 router.register(r'matieres',          views.MatiereViewSet,          basename='matiere')
 router.register(r'qualifications',    views.QualificationViewSet,    basename='qualification')
 router.register(r'cours',             views.CoursViewSet,            basename='cours')
-router.register(r'unites-ens',        views.UniteEnseignementViewSet,basename='uniteenseignement')
 router.register(r'periodes',          views.PeriodeViewSet,          basename='periode')
 router.register(r'evaluations',       views.EvaluationViewSet,       basename='evaluation')
 router.register(r'fiches-notes',      views.FicheNotesViewSet,       basename='fiche-notes')
@@ -92,6 +91,7 @@ router.register(r'audit',             views.AuditLogViewSet,         basename='a
 
 # ── Multi-établissement ───────────────────────────────────────────────────────
 router.register(r'niveaux-scolaires', views.NiveauScolaireViewSet,   basename='niveau-scolaire')
+router.register(r'coefficients',      views.CoefficientMatiereViewSet, basename='coefficient')
 router.register(r'config-bulletin',   views.ConfigBulletinViewSet,   basename='config-bulletin')
 
 # ── URL patterns ──────────────────────────────────────────────────────────────

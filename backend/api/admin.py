@@ -9,7 +9,7 @@ from .models import (
     Cycle, Niveau, Classe, MentionClasse, Etudiant, Enseignant, Utilisateur,
     Personnel,
     Tranche, Frais, Inscription, FraisInscription, Paiement, Moratoire,
-    Matiere, Qualification, Cours, UniteEnseignement, Periode, Evaluation,
+    Matiere, Qualification, Cours, Periode, Evaluation,
     Planning, RapportCours
 )
 # ─────────────────────────────────────────
@@ -172,12 +172,9 @@ class CoursAdmin(admin.ModelAdmin):
     list_display  = ['code_matiere', 'code_classe', 'mle_ens', 'semestre', 'code_annee', 'quota_horaire', 'credits']
     list_filter   = ['code_classe', 'semestre', 'code_annee']
     search_fields = ['code_matiere__lib_matiere', 'code_classe__lib_classe']
-class UniteEnseignementAdmin(admin.ModelAdmin):
-    list_display  = ['code_matiere', 'code_classe', 'coef', 'nbh_total', 'mle_ens', 'code_annee']
-    list_filter   = ['code_annee', 'code_classe']
 @admin.register(Periode)
 class PeriodeAdmin(admin.ModelAdmin):
-    list_display  = ['code_periode', 'lib_periode', 'date_debut', 'date_fin', 'code_annee']
+    list_display  = ['code_periode', 'lib_periode', 'periode_parent', 'date_debut', 'date_fin', 'code_annee']
     list_filter   = ['code_annee']
 @admin.register(Evaluation)
 class EvaluationAdmin(admin.ModelAdmin):

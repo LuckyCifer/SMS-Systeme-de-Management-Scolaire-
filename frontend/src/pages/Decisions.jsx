@@ -11,11 +11,89 @@ import { decisionService } from '../services/endpoints';
 import { LoadingState, ErrorState } from '../components/ApiState';
 import { useEtablissement } from '../hooks/useEtablissement';
 import { etabLabels } from '../utils/etabLabels';
+import { getUser } from '../utils/Auth';
+
+// Rôles autorisés à lancer une délibération automatique (miroir de
+// DecisionViewSet.ROLES_DELIBERATION côté backend).
+const ROLES_DELIBERATION = ['SUPER_ADMIN', 'ADMIN', 'SCOLARITE', 'CENSEUR'];
 
 const RESULTAT_COLORS = {
   ADMIS: 'badge-success', AJOURNE: 'badge-warning',
   REDOUBLE: 'badge-danger', EXCLU: 'badge-secondary',
 };
+
+// ── Délibération automatique ──────────────────────────────────────────────────
+// Calcule la moyenne annuelle de chaque élève de la classe (backend api/notes.py) et
+// crée / met à jour sa décision : seuil de passage au primaire et au secondaire,
+// règles LMD au supérieur (validation des matières, compensation, note éliminatoire).
+function GenererModal({ classes, annees, labels, onClose, onDone }) {
+  const { t, toast } = useApp();
+  const [f, setF] = useState({
+    code_classe: '', code_annee: annees[0]?.code_annee || '', session: 'NORMALE', seuil: 10,
+  });
+  const [running, setRunning] = useState(false);
+  const ch = e => setF(prev => ({ ...prev, [e.target.name]: e.target.value }));
+
+  const lancer = async e => {
+    e.preventDefault();
+    setRunning(true);
+    try {
+      const { data } = await decisionService.generer({ ...f, seuil: Number(f.seuil) });
+      toast.success(`${data.crees} décision(s) créée(s), ${data.mis_a_jour} mise(s) à jour`
+        + (data.sans_notes ? ` — ${data.sans_notes} élève(s) sans note ignoré(s)` : ''));
+      onDone();
+    } catch (err) {
+      toast.error(err.response?.data?.error || err.response?.data?.detail || t.errors.saving);
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <div className="sms-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="sms-modal" style={{ maxWidth: 520 }}>
+        <div className="sms-modal-header">
+          <div className="sms-modal-title">
+            <i className="fas fa-magic" style={{ marginRight: 8, color: 'var(--green)' }}></i>
+            Générer les décisions
+          </div>
+          <button className="sms-btn-icon" onClick={onClose}><i className="fas fa-times"></i></button>
+        </div>
+        <form onSubmit={lancer}>
+          <div className="sms-modal-body">
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 0 }}>
+              {labels.isSuperieur
+                ? "Matière validée si sa moyenne ≥ 10. Si la moyenne générale atteint le seuil et qu'aucune matière n'est sous sa note éliminatoire, toutes les matières sont validées par compensation. Admis si tous les crédits sont validés."
+                : `Admis si la moyenne annuelle (pondérée par les coefficients) atteint le seuil, sinon redouble.`}
+              {' '}Les décisions existantes de cette session sont mises à jour (le président du jury
+              et les observations déjà saisis sont conservés). Vous pourrez ajuster chaque décision ensuite.
+            </p>
+            <div className="sms-form-row">
+              <SearchableSelect
+                label={t.fields.classe} name="code_classe" value={f.code_classe} onChange={ch} required
+                options={classes.map(c => ({ value: c.code_classe, label: c.lib_classe }))}
+              />
+              <FormField label={t.fields.annee} name="code_annee" type="select" value={f.code_annee} onChange={ch} required
+                options={annees.map(a => ({ value: a.code_annee, label: a.lib_annee || a.code_annee }))} />
+            </div>
+            <div className="sms-form-row">
+              <FormField label={t.fields.session} name="session" type="select" value={f.session} onChange={ch}
+                options={[{ value: 'NORMALE', label: 'Session normale' }, { value: 'RATTRAPAGE', label: 'Rattrapage' }]} />
+              <FormField label="Seuil d'admission (/20)" name="seuil" type="number" value={f.seuil} onChange={ch} required />
+            </div>
+          </div>
+          <div className="sms-modal-footer">
+            <button type="button" className="sms-btn sms-btn-outline sms-btn-sm" onClick={onClose}>{t.common.cancel}</button>
+            <button type="submit" className="sms-btn sms-btn-primary sms-btn-sm" disabled={running || !f.code_classe || !f.code_annee}>
+              {running ? <><div className="sms-spinner" style={{ width: 14, height: 14 }}></div> {t.common.loading}</>
+                : <><i className="fas fa-gavel"></i> Délibérer</>}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
 
 function Form({ item, onClose, onSave, labels }) {
   const { t } = useApp();
@@ -131,6 +209,8 @@ export default function Decisions() {
   const [departements,   setDepartements]   = useState([]);
   const [specialites,    setSpecialites]    = useState([]);
   const [filteredSp,     setFilteredSp]     = useState([]);
+  const [showGenerer,    setShowGenerer]    = useState(false);
+  const peutDeliberer = ROLES_DELIBERATION.includes(getUser()?.role);
 
   const { data, loading, error, reload } = useApi(
     () => decisionService.list({
@@ -223,7 +303,7 @@ export default function Decisions() {
       const color = RESULTAT_COLORS[r.resultat] || 'badge-secondary';
       return <span className={`sms-badge ${color}`}>{r.resultat}</span>;
     }},
-    { key: 'rang', label: t.fields.rang, render: r => r.rang ? `${r.rang}/${r.effectif}` : '—' },
+    { key: 'rang', label: t.fields.rang, render: r => r.rang ? `${r.rang}/${r.effectif ?? '—'}` : '—' },
   ];
 
   if (loading) return <LoadingState />;
@@ -251,6 +331,19 @@ export default function Decisions() {
           </div>
         ))}
       </div>
+
+      {peutDeliberer && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+          <button className="sms-btn sms-btn-primary" onClick={() => setShowGenerer(true)}>
+            <i className="fas fa-magic"></i> Générer les décisions
+          </button>
+        </div>
+      )}
+      {showGenerer && (
+        <GenererModal classes={classes} annees={annees} labels={labels}
+          onClose={() => setShowGenerer(false)}
+          onDone={() => { setShowGenerer(false); reload(); }} />
+      )}
 
       <CrudTable
         title={t.pages.decisions.title}

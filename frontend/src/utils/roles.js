@@ -35,7 +35,7 @@ export const ROLE_PERMISSIONS = {
   },
   SCOLARITE: {
     pages:   ['dashboard', 'students', 'classes', 'cours', 'inscription', 'evaluation', 'grades',
-              'absences', 'bulletins', 'importCsv', 'personnel', 'epreuves'],
+              'absences', 'bulletins', 'importCsv', 'personnel', 'epreuves', 'coefficients'],
     canEdit: true,
     canDelete: true,
     canCreate: true,
@@ -74,7 +74,7 @@ export const ROLE_PERMISSIONS = {
   // d'administration système).
   CENSEUR: {
     pages:   ['dashboard', 'students', 'teachers', 'classes', 'cours', 'evaluation',
-              'grades', 'examens', 'planning', 'absences', 'bulletins'],
+              'grades', 'examens', 'planning', 'absences', 'bulletins', 'coefficients'],
     canEdit: true,
     canDelete: false,
     canCreate: true,

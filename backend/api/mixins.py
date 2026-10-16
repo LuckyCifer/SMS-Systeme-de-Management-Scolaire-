@@ -5,21 +5,23 @@ Utilisation :
     class MyViewSet(EtablissementFilterMixin, SMSBaseViewSet):
         ...
 
-Le contexte établissement/type d'établissement est déterminé par `trusted_etablissement_header()`
-et `trusted_type_etab_header()` :
-  - SUPER_ADMIN : peut naviguer librement — les en-têtes HTTP X-Etablissement-Id / X-Type-Etab
-    envoyés par le frontend (sélecteur d'interface) sont honorés tels quels.
-  - Tout autre rôle : ces en-têtes sont IGNORÉS. Le contexte est toujours dérivé de
-    l'établissement assigné à l'utilisateur en base (Utilisateur.etablissement). Un en-tête
-    client n'est jamais une source d'autorisation — sinon n'importe quel utilisateur authentifié
-    pourrait se faire passer pour un autre établissement en changeant un simple header (IDOR).
+Règle : chaque requête porte sur UNE SEULE école, « l'établissement courant »
+(`trusted_etablissement_header()`), et toutes les données affichées en dépendent — y compris
+le type (primaire / secondaire / supérieur), qui se déduit toujours de cette école :
+  - SUPER_ADMIN : l'école choisie dans le sélecteur d'interface (en-tête X-Etablissement-Id),
+    ou à défaut la première école active. Il passe d'une école à l'autre, jamais plusieurs
+    à la fois.
+  - Tout autre rôle : l'école assignée au compte en base (Utilisateur.etablissement) ; l'en-tête
+    est IGNORÉ. Un en-tête client n'est jamais une source d'autorisation (IDOR).
 
-Le mixin :
-  - filtre get_queryset() si le modèle possède un champ 'etablissement'
-  - injecte etablissement_id à la création
-  - refuse par défaut (queryset vide) si l'établissement ne peut pas être déterminé pour un
-    utilisateur non SUPER_ADMIN, plutôt que de retomber silencieusement sur "tous les
-    établissements" ou "le premier établissement actif"
+EtablissementFilterMixin (modèles avec un champ 'etablissement') :
+  - filtre get_queryset() sur l'école courante, refus par défaut si elle est indéterminée ;
+  - impose l'école courante à la création ET à la modification (une donnée ne peut pas être
+    « déplacée » vers une autre école en changeant son champ etablissement).
+
+EtablissementParRelationMixin (modèles sans champ 'etablissement', rattachés à l'école par
+une relation : absence → élève, détail de facture → facture…) : même filtrage via
+`etablissement_lookups`, et refus d'écrire une donnée qui ne serait pas de l'école courante.
 
 En complément, `scope_queryset_to_enseignant()` / `scope_queryset_to_enseignant_cours()`
 restreignent un compte ENSEIGNANT à ses propres matières/classes (via Cours), pour les
@@ -61,28 +63,36 @@ def is_super_admin(request):
 
 def trusted_etablissement_header(request):
     """
-    Valeur fiable pour le contexte "établissement courant" de la requête.
-    SUPER_ADMIN → contenu réel de l'en-tête X-Etablissement-Id (switch d'interface).
+    École courante de la requête (code_etab), ou '' si indéterminable.
+    SUPER_ADMIN → l'école de l'en-tête X-Etablissement-Id si elle existe, sinon la première
+                  école active (il est toujours « connecté » à une école).
     Autre rôle  → toujours son propre établissement assigné en base ; l'en-tête est ignoré.
-    Retourne une chaîne vide si indéterminable (comportement identique à un header absent).
     """
+    if hasattr(request, '_sms_etablissement_courant'):
+        return request._sms_etablissement_courant
+    from .models import Etablissement
     profile = get_utilisateur_profile(request)
+    etab_id = ''
     if profile and profile.role == 'SUPER_ADMIN':
-        return request.META.get('HTTP_X_ETABLISSEMENT_ID', '').strip()
-    if profile and profile.etablissement_id:
-        return str(profile.etablissement_id)
-    return ''
+        demande = request.META.get('HTTP_X_ETABLISSEMENT_ID', '').strip()
+        if demande and Etablissement.objects.filter(pk=demande).exists():
+            etab_id = demande
+        else:
+            etab_id = (Etablissement.objects.filter(actif=True).order_by('code_etab')
+                       .values_list('code_etab', flat=True).first() or '')
+    elif profile and profile.etablissement_id:
+        etab_id = str(profile.etablissement_id)
+    request._sms_etablissement_courant = etab_id
+    return etab_id
 
 
-def trusted_type_etab_header(request):
-    """
-    Valeur fiable pour le contexte "type d'établissement" (sélecteur SUPER_ADMIN uniquement).
-    Pour tout autre rôle, retourne toujours '' : le contexte doit être dérivé de son propre
-    établissement (via trusted_etablissement_header), jamais d'un en-tête client.
-    """
-    if is_super_admin(request):
-        return request.META.get('HTTP_X_TYPE_ETAB', '').strip()
-    return ''
+def type_etab_courant(request):
+    """Type (PRIMAIRE / SECONDAIRE / SUPERIEUR) de l'école courante, ou None."""
+    from .models import Etablissement
+    etab_id = trusted_etablissement_header(request)
+    if not etab_id:
+        return None
+    return Etablissement.objects.filter(pk=etab_id).values_list('type_etab', flat=True).first()
 
 
 def is_enseignant(request):
@@ -166,57 +176,75 @@ def assert_enseignant_teaches(request, code_matiere, code_classe):
 
 class EtablissementFilterMixin:
 
-    def get_type_etab_id(self):
-        return trusted_type_etab_header(self.request) or None
-
     def get_etablissement_id(self):
-        etab_id = trusted_etablissement_header(self.request)
-        if etab_id:
-            return etab_id
-        if is_super_admin(self.request):
-            try:
-                from .models import Etablissement
-                etab = Etablissement.objects.filter(actif=True).first()
-                return etab.code_etab if etab else None
-            except Exception:
-                return None
-        return None
+        return trusted_etablissement_header(self.request) or None
 
     def get_queryset(self):
         qs = super().get_queryset()
         if not _has_etab_field(qs.model):
             return qs
-
-        super_admin = is_super_admin(self.request)
-
-        # SUPER_ADMIN avec un type sélectionné → filtre par tous les étabs de ce type
-        type_etab_id = self.get_type_etab_id()
-        if super_admin and type_etab_id:
-            try:
-                from .models import Etablissement
-                etab_ids = list(
-                    Etablissement.objects.filter(type_etab=type_etab_id)
-                    .values_list('code_etab', flat=True)
-                )
-                return qs.filter(etablissement_id__in=etab_ids) if etab_ids else qs.none()
-            except Exception:
-                pass
-
         etab_id = self.get_etablissement_id()
-        if not etab_id:
-            # SUPER_ADMIN sans sélection → vue globale (comportement historique voulu).
-            # Tout autre rôle sans établissement résolu → refus par défaut, jamais une fuite.
-            return qs if super_admin else qs.none()
-        return qs.filter(etablissement_id=etab_id)
+        # Une seule école à la fois, y compris pour le SUPER_ADMIN ; refus par défaut si
+        # l'école ne peut pas être déterminée, jamais une vue « toutes écoles ».
+        return qs.filter(etablissement_id=etab_id) if etab_id else qs.none()
 
-    def perform_create(self, serializer):
+    def _save_dans_etablissement(self, serializer, action):
         etab_id = self.get_etablissement_id()
         extra = {}
         if etab_id and _has_etab_field(serializer.Meta.model):
             extra['etablissement_id'] = etab_id
         instance = serializer.save(**extra)
         log_action(
-            self.request, 'CREATE',
+            self.request, action,
             self.__class__.__name__.replace('ViewSet', ''),
             getattr(instance, instance._meta.pk.name, ''),
         )
+        return instance
+
+    def perform_create(self, serializer):
+        self._save_dans_etablissement(serializer, 'CREATE')
+
+    def perform_update(self, serializer):
+        # Une modification ne peut pas changer l'école d'une donnée.
+        self._save_dans_etablissement(serializer, 'UPDATE')
+
+
+class EtablissementParRelationMixin:
+    """
+    Isolation des modèles sans champ 'etablissement' : `etablissement_lookups` liste les
+    chemins vers l'école (ex. ['mle_etudiant__etablissement'] ; plusieurs chemins = l'un
+    OU l'autre, ex. badge d'un élève ou d'un enseignant).
+    """
+    etablissement_lookups = ()
+
+    def _q_etablissement(self, etab_id):
+        from django.db.models import Q
+        q = Q()
+        for lookup in self.etablissement_lookups:
+            q |= Q(**{lookup: etab_id})
+        return q
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        etab_id = trusted_etablissement_header(self.request)
+        return qs.filter(self._q_etablissement(etab_id)).distinct() if etab_id else qs.none()
+
+    def _save_verifie(self, serializer, action):
+        from django.db import transaction
+        from rest_framework.exceptions import PermissionDenied
+        etab_id = trusted_etablissement_header(self.request)
+        with transaction.atomic():
+            instance = serializer.save()
+            modele = type(instance)
+            if not etab_id or not modele.objects.filter(
+                    self._q_etablissement(etab_id), pk=instance.pk).exists():
+                raise PermissionDenied("Cette donnée doit appartenir à votre établissement.")
+        log_action(self.request, action, self.__class__.__name__.replace('ViewSet', ''),
+                   getattr(instance, instance._meta.pk.name, ''))
+        return instance
+
+    def perform_create(self, serializer):
+        self._save_verifie(serializer, 'CREATE')
+
+    def perform_update(self, serializer):
+        self._save_verifie(serializer, 'UPDATE')
