@@ -130,7 +130,7 @@ export default function Stages() {
 
   const { data, count, loading, error, reload } = useApi(
     () => stageService.list({
-      page_size: PAGE_SIZE, page,
+      page_size: PAGE_SIZE * page, page: 1,  // défilement infini : les `page` premières tranches
       ...(anneeActive    ? { code_annee: anneeActive.code_annee } : {}),
       ...(depFilter      ? { code_dep:   depFilter   } : {}),
       ...(spFilter       ? { code_sp:    spFilter    } : {}),

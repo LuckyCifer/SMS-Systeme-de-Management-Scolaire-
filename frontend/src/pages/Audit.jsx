@@ -3,12 +3,15 @@
  * Journal d'audit — historique de toutes les actions.
  * Stats côté serveur + liste scrollable (pas de pagination numérotée).
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
+import { useTr } from '../hooks/useTr';
 import { useApi } from '../hooks/useApi';
 import { LoadingState, ErrorState } from '../components/ApiState';
 import EmptyState from '../components/EmptyState';
 import api from '../services/api';
+
+const TRANCHE_AUDIT = 100;
 
 const ACTION_BADGE_COLOR = {
   LOGIN_SUCCESS: 'badge-success',
@@ -23,6 +26,7 @@ const ACTION_BADGE_COLOR = {
 
 export default function Audit() {
   const { t, lang, toast } = useApp();
+  const tr = useTr();
   const [search,       setSearch]       = useState('');
   const [actionFilter, setActionFilter] = useState('');
   const [statsData,    setStatsData]    = useState(null);
@@ -32,21 +36,38 @@ export default function Audit() {
     api.get('/api/audit/stats/').then(r => setStatsData(r.data)).catch(() => {});
   }, []);
 
-  const { data, loading, error, reload } = useApi(
-    () => api.get('/api/audit/', { params: { page_size: 500, ordering: '-date_action' } })
+  // Défilement infini : on charge les `tranches` premières tranches de TRANCHE_AUDIT lignes.
+  const [tranches, setTranches] = useState(1);
+  // Recherche et filtre d'action faits par le serveur, sur tout l'historique (pas seulement
+  // sur les lignes déjà chargées). La recherche part 350 ms après la dernière frappe.
+  const [recherche, setRecherche] = useState('');
+  useEffect(() => {
+    const id = setTimeout(() => setRecherche(search.trim()), 350);
+    return () => clearTimeout(id);
+  }, [search]);
+  useEffect(() => { setTranches(1); }, [recherche, actionFilter]);
+  const { data, count, loading, error, reload } = useApi(
+    () => api.get('/api/audit/', { params: {
+      page_size: TRANCHE_AUDIT * tranches, ordering: '-date_action',
+      ...(recherche    ? { search: recherche }    : {}),
+      ...(actionFilter ? { action: actionFilter } : {}),
+    } }),
+    [tranches, recherche, actionFilter]
   );
+  const resteACharger = (data?.length || 0) < (count || 0);
+  const attenteRef = useRef(false);
+  useEffect(() => { attenteRef.current = false; }, [data]);
+  const surDefilement = e => {
+    const el = e.currentTarget;
+    if (resteACharger && !attenteRef.current && el.scrollTop + el.clientHeight >= el.scrollHeight - 120) {
+      attenteRef.current = true;
+      setTranches(n => n + 1);
+    }
+  };
 
   const logs = data || [];
 
-  const filtered = logs.filter(l => {
-    const matchSearch = !search ||
-      l.utilisateur?.toLowerCase().includes(search.toLowerCase()) ||
-      l.modele?.toLowerCase().includes(search.toLowerCase()) ||
-      l.detail?.toLowerCase().includes(search.toLowerCase()) ||
-      l.objet_id?.toLowerCase?.().includes(search.toLowerCase());
-    const matchFilter = !actionFilter || l.action === actionFilter;
-    return matchSearch && matchFilter;
-  });
+  const filtered = logs;
 
   const handleExport = () => {
     const token = localStorage.getItem('sms_access');
@@ -80,7 +101,7 @@ export default function Audit() {
             {ta.title}
           </h1>
           <p className="page-subtitle">
-            {ta.subtitleFull.replace('{n}', filtered.length)}
+            {ta.subtitleFull.replace('{n}', count ?? filtered.length)}
           </p>
         </div>
         <div className="flex gap-2">
@@ -111,7 +132,7 @@ export default function Audit() {
       <div className="sms-card" style={{ display:'flex', flexDirection:'column', maxHeight:'calc(100vh - 260px)', overflow:'hidden' }}>
         <div className="sms-card-header" style={{ flexShrink:0 }}>
           <div className="sms-card-title">
-            <i className="fas fa-list"></i> {ta.entries.replace('{n}', filtered.length)}
+            <i className="fas fa-list"></i> {ta.entries.replace('{n}', count ?? filtered.length)}
           </div>
           <div className="flex gap-2">
             <select
@@ -137,7 +158,7 @@ export default function Audit() {
           </div>
         </div>
 
-        <div className="sms-table-wrap" style={{ flex:1, overflowY:'auto', overflowX:'auto' }}>
+        <div className="sms-table-wrap" onScroll={surDefilement} style={{ flex:1, overflowY:'auto', overflowX:'auto', maxHeight:'none' }}>
           <table className="sms-table">
             <thead>
               <tr>
@@ -188,6 +209,14 @@ export default function Audit() {
                   </tr>
                 );
               })}
+              {resteACharger && (
+                <tr>
+                  <td colSpan={7} style={{ textAlign:'center', padding:12, color:'var(--text-muted)', fontSize:12 }}>
+                    <div className="sms-spinner" style={{ width:12, height:12, display:'inline-block', marginRight:8, verticalAlign:'middle' }}></div>
+                    {t.common.loadingMore}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -196,6 +225,7 @@ export default function Audit() {
         <div style={{ flexShrink:0, padding:'8px 16px', borderTop:'1px solid var(--border)', boxShadow:'0 -4px 16px rgba(0,0,0,.10)', display:'flex', justifyContent:'space-between', alignItems:'center', background:'var(--bg-card)', zIndex:2, position:'relative' }}>
           <span style={{ fontSize:12, color:'var(--text-muted)' }}>
             {filtered.length} {filtered.length !== 1 ? t.common.elements : t.common.element}
+            {count != null && ` — ${logs.length} ${t.common.of} ${count} ${tr('chargés', 'loaded')}`}
           </span>
           <button className="sms-btn sms-btn-outline sms-btn-sm" onClick={reload}>
             <i className="fas fa-sync-alt"></i> {t.common.refresh}

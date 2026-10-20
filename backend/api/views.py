@@ -34,6 +34,7 @@ from . import horaires
 from .notes import (calculer_resultats, deliberer, generer_sequences, series_du_niveau, importer_fiche,
                     periode_close, verifier_periode_ouverte)
 from .permissions import RoleBasedPermission
+from .recherche import RechercheAvecLibelles
 from .mixins import (
     EtablissementFilterMixin, EtablissementParRelationMixin, trusted_etablissement_header, type_etab_courant,
     is_super_admin, get_utilisateur_profile, is_etudiant, get_etudiant_profile, scope_queryset_to_etudiant,
@@ -136,7 +137,7 @@ def _scoped_queryset(viewset_cls, request):
 
 class SMSBaseViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, RoleBasedPermission]
-    filter_backends    = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filter_backends    = [DjangoFilterBackend, RechercheAvecLibelles, filters.OrderingFilter]
     # Compte ÉLÈVE : `etudiant_lookup` = chemin vers l'élève (il ne voit que ses lignes) ;
     # `interdit_etudiant` = données réservées au personnel (aucune ligne).
     etudiant_lookup   = None
@@ -329,7 +330,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     # Journal de sécurité — réservé à ADMIN/SUPER_ADMIN même en lecture (RoleBasedPermission
     # ne restreint que l'écriture, insuffisant ici).
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
-    filter_backends    = [filters.SearchFilter, filters.OrderingFilter, DjangoFilterBackend]
+    filter_backends    = [RechercheAvecLibelles, filters.OrderingFilter, DjangoFilterBackend]
     search_fields      = ['utilisateur', 'action', 'modele', 'objet_id', 'detail']
 
     def get_queryset(self):
@@ -661,7 +662,8 @@ class EtudiantViewSet(EtablissementFilterMixin, SMSBaseViewSet):
     etudiant_lookup = 'mle_etudiant'
     queryset         = Etudiant.objects.select_related('code_dep', 'code_sp').all()
     serializer_class = EtudiantSerializer
-    search_fields    = ['nom', 'prenom', 'mle_etudiant', 'email', 'tel', 'numero_cni']
+    search_fields    = ['nom', 'prenom', 'mle_etudiant', 'email', 'tel', 'numero_cni', 'lieu',
+                        'nationalite', 'region_or', 'code_dep__lib_dep', 'code_sp__lib_sp']
     filterset_fields = ['code_dep', 'code_sp', 'sexe', 'nationalite']
     parser_classes   = [MultiPartParser, FormParser, JSONParser]
 
@@ -1434,7 +1436,8 @@ class PaiementViewSet(EtablissementFilterMixin, SMSBaseViewSet):
         'mle_etudiant__code_dep', 'mle_etudiant__code_sp',
         'code_tranche', 'code_annee').all()
     serializer_class = PaiementSerializer
-    search_fields    = ['mle_etudiant__nom']
+    search_fields    = ['code_paiement', 'mle_etudiant__nom', 'mle_etudiant__prenom', 'mle_etudiant__mle_etudiant', 'type_paiement', 'statut',
+                        'mode_paiement', 'ref_paiement', 'code_tranche__lib_tranche', 'code_annee__code_annee', 'code_annee__lib_annee']
     filterset_fields = ['code_annee', 'code_tranche', 'statut', 'mle_etudiant', 'type_paiement']
 
     def get_queryset(self):
@@ -1533,7 +1536,7 @@ class FactureViewSet(EtablissementFilterMixin, SMSBaseViewSet):
     etudiant_lookup = 'mle_etudiant'
     queryset         = Facture.objects.select_related('mle_etudiant').all()
     serializer_class = FactureSerializer
-    search_fields    = ['numero_facture', 'mle_etudiant__nom']
+    search_fields    = ['numero_facture', 'mle_etudiant__nom', 'mle_etudiant__prenom', 'mle_etudiant__mle_etudiant', 'statut', 'code_annee__code_annee', 'code_annee__lib_annee']
     filterset_fields = ['statut', 'code_annee', 'mle_etudiant']
 
     @action(detail=False, methods=['get'], url_path='stats')
@@ -1635,7 +1638,9 @@ class EvaluationViewSet(EtablissementFilterMixin, SMSBaseViewSet):
     queryset         = Evaluation.objects.select_related(
         'mle_etudiant', 'code_matiere', 'code_classe', 'code_periode', 'code_type_eval').all()
     serializer_class = EvaluationSerializer
-    search_fields    = ['mle_etudiant__nom', 'code_matiere__lib_matiere']
+    search_fields    = ['mle_etudiant__nom', 'mle_etudiant__prenom', 'mle_etudiant__mle_etudiant',
+                        'code_matiere__lib_matiere', 'code_classe__lib_classe',
+                        'code_type_eval__lib_type_eval', 'appreciation']
     filterset_fields = ['code_classe', 'code_periode', 'code_type_eval', 'mle_etudiant',
                         'code_matiere', 'code_annee']
 
@@ -1889,7 +1894,8 @@ class FicheNotesViewSet(EtablissementFilterMixin, SMSBaseViewSet):
     queryset         = FicheNotes.objects.select_related(
         'code_matiere', 'code_classe', 'mle_ens', 'code_periode', 'code_type_eval').all()
     serializer_class = FicheNotesSerializer
-    search_fields    = ['code_matiere__lib_matiere']
+    search_fields    = ['code_matiere__lib_matiere', 'code_classe__lib_classe', 'mle_ens__nom_ens', 'mle_ens__prenom_ens',
+                        'code_type_eval__lib_type_eval', 'code_periode__lib_periode', 'statut']
     filterset_fields = ['code_classe', 'code_annee', 'mle_ens', 'statut']
 
     def get_queryset(self):
@@ -2311,7 +2317,8 @@ class SeanceViewSet(EtablissementFilterMixin, SMSBaseViewSet):
     queryset         = Seance.objects.select_related(
         'code_matiere', 'code_classe', 'mle_ens', 'code_annee').all()
     serializer_class = SeanceSerializer
-    search_fields    = ['code_matiere__lib_matiere']
+    search_fields    = ['code_matiere__lib_matiere', 'code_classe__lib_classe', 'mle_ens__nom_ens', 'mle_ens__prenom_ens',
+                        'salle', 'statut']
     filterset_fields = ['code_classe', 'mle_ens', 'code_annee', 'statut', 'date_seance']
 
     def get_queryset(self):
@@ -2413,7 +2420,8 @@ class ExamenViewSet(EtablissementFilterMixin, SMSBaseViewSet):
     queryset         = Examen.objects.select_related(
         'code_matiere', 'code_classe', 'code_annee', 'code_periode').all()
     serializer_class = ExamenSerializer
-    search_fields    = ['lib_examen']
+    search_fields    = ['lib_examen', 'code_matiere__lib_matiere', 'code_classe__lib_classe', 'type_examen',
+                        'type_officiel', 'organisme', 'surveillant', 'code_salle']
     filterset_fields = ['code_classe', 'code_annee', 'type_examen']
 
     def get_queryset(self):
@@ -2887,14 +2895,14 @@ class CarteEtudiantViewSet(EtablissementFilterMixin, SMSBaseViewSet):
     etudiant_lookup = 'mle_etudiant'
     queryset         = CarteEtudiant.objects.select_related('mle_etudiant').all()
     serializer_class = CarteEtudiantSerializer
-    search_fields    = ['numero_carte', 'mle_etudiant__nom']
+    search_fields    = ['numero_carte', 'mle_etudiant__nom', 'mle_etudiant__prenom', 'mle_etudiant__mle_etudiant', 'statut', 'code_annee__code_annee', 'code_annee__lib_annee']
     filterset_fields = ['code_annee', 'statut', 'mle_etudiant']
 
 class StageViewSet(EtablissementFilterMixin, SMSBaseViewSet):
     etudiant_lookup = 'mle_etudiant'
     queryset         = Stage.objects.select_related('mle_etudiant').all()
     serializer_class = StageSerializer
-    search_fields    = ['entreprise', 'sujet', 'mle_etudiant__nom']
+    search_fields    = ['entreprise', 'sujet', 'tuteur_entreprise', 'type_stage', 'statut', 'mle_etudiant__nom', 'mle_etudiant__prenom', 'mle_etudiant__mle_etudiant']
     filterset_fields = ['code_annee', 'type_stage', 'statut', 'certificat_emis']
 
     def get_queryset(self):

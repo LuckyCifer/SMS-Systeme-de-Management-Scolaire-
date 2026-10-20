@@ -5,6 +5,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import { CrudTable, FormField } from '../components/CrudTable';
 import { useApp } from '../context/AppContext';
+import { useTr } from '../hooks/useTr';
 import { useApi, useMutation } from '../hooks/useApi';
 import { matiereService, moduleService } from '../services/endpoints';
 import { LoadingState, ErrorState } from '../components/ApiState';
@@ -383,6 +384,7 @@ const TYPE_LABELS_MAP = { PRIMAIRE:'Primaire', SECONDAIRE:'Secondaire', SUPERIEU
 
 export default function Matieres() {
   const { t, toast, lang } = useApp();
+  const tr = useTr();
   const { typeEtab, systeme } = useEtablissement();
   const labels = etabLabels(typeEtab, systeme, lang);
   const [moduleFilter,    setModuleFilter]    = useState('');
@@ -416,7 +418,12 @@ export default function Matieres() {
     const q = search.toLowerCase();
     return data
       .filter(m => !moduleFilter || (m.code_module?.code_module || m.code_module) === moduleFilter)
-      .filter(m => !q || m.lib_matiere?.toLowerCase().includes(q) || m.code_matiere?.toLowerCase().includes(q));
+      // Tout ce qu'affiche le tableau : code, libellé, module, type d'établissement, observations.
+      .filter(m => !q || [
+        m.code_matiere, m.lib_matiere, m.lib_module, m.code_module?.lib_module,
+        m.code_module?.code_module || m.code_module,
+        m.type_etab ? TYPE_LABELS_MAP[m.type_etab] : tr('Partagée', 'Shared'), m.obs_matiere,
+      ].some(v => typeof v === 'string' && v.toLowerCase().includes(q)));
   }, [data, moduleFilter, search]);
 
   // ── Stats ─────────────────────────────────────────────────────────────────
@@ -464,7 +471,7 @@ export default function Matieres() {
     },
     {
       key: 'type',
-      label: "Type étab.",
+      label: tr('Type étab.', 'School type'),
       render: r => r.type_etab
         ? <span style={{
             fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 8,
@@ -472,7 +479,7 @@ export default function Matieres() {
             color: TYPE_COLORS_MAP[r.type_etab] || '#888',
             border: `1px solid ${TYPE_COLORS_MAP[r.type_etab] || '#888'}40`,
           }}>{TYPE_LABELS_MAP[r.type_etab]}</span>
-        : <span style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>Partagée</span>,
+        : <span style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>{tr('Partagée', 'Shared')}</span>,
     },
     {
       key: 'obs',

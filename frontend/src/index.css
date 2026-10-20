@@ -362,7 +362,10 @@ body {
 /* ═══════════════════════════════════════════════════════════════════
    TABLES
    ═══════════════════════════════════════════════════════════════════ */
-.sms-table-wrap { overflow-x: auto; }
+/* Tous les tableaux défilent dans un cadre de hauteur fixe (en-têtes collants ci-dessous) :
+   ils ne grandissent plus avec le nombre de lignes. CrudTable, Notes et Audit gèrent leur
+   propre hauteur (maxHeight: 'none' en ligne). */
+.sms-table-wrap { overflow: auto; max-height: min(70vh, 640px); }
 .sms-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
 .sms-table thead th {
   position: sticky; top: 0; z-index: 3;

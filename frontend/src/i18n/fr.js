@@ -16,6 +16,8 @@ const fr = {
     grades:       'Notes',
     payments:     'Paiements',
     planning:     'Planning',
+    vieScolaire:  'Vie scolaire',
+    coefficients: 'Coefficients',
     users:        'Utilisateurs',
     profile:      'Profil',
     logout:       'Déconnexion',
@@ -182,6 +184,8 @@ const fr = {
     moyenne:           'Moyenne',
     // Pagination et actions de masse
     of:                'sur',
+    loadingMore:       'Chargement…',
+    scrollForMore:     'Faites défiler pour afficher la suite',
     perPage:           'Par page :',
     element:           'élément',
     elements:          'éléments',

@@ -117,7 +117,7 @@ Projet SMS/
 ### 4.4 Pédagogie et notes
 | Modèle | Portée | Description |
 |---|---|---|
-| `Cours` | École | Matière × classe × semestre/trimestre × année ; `credits` et `note_elim` (supérieur) |
+| `Cours` | École | Matière × classe × année ; `semestre` = S1/S2 au supérieur, `AN` (année entière) au primaire et au secondaire ; `credits` et `note_elim` (supérieur) |
 | `CoefficientMatiere` | École | Grille des coefficients (primaire / secondaire) : année × niveau × série × matière |
 | `Evaluation` | École | Notes /20 ; au primaire, `appreciation` (A/ECA/NA) déduite automatiquement |
 | `FicheNotes` / `FicheNotesDetail` | École / (fiche) | Fiches de notes des enseignants |
@@ -225,7 +225,9 @@ Projet SMS/
 - **Surveillant général** : `/api/vie-scolaire/jour/` (absences et retards du jour, deux sources), `justifier/`, `alertes/` (heures non justifiées de l'année ≥ seuil ; une demi-journée d'appel = 4 h par défaut).
 
 ### 8.4 Emploi du temps et pauses (`api/horaires.py`, page `/planning`)
-- Le planning affiché est filtré par classe, trimestre ou semestre, **et par l'année active du bandeau**.
+- **Primaire et secondaire (francophone et anglophone) : un seul emploi du temps par classe et par année.** Les cours y sont « Année entière » (`Cours.semestre = 'AN'`, imposé par `CoursSerializer`) ; les trimestres ne servent qu'aux notes. Pas de sélecteur de période dans Planning ni de champ semestre dans Cours. Un ajustement en cours d'année = modifier les créneaux.
+- Supérieur : un emploi du temps par semestre (S1 / S2), sélecteur conservé.
+- Le planning affiché est filtré par classe (et semestre au supérieur), **et par l'année active du bandeau**.
 - Les pauses (`PauseHoraire`, API `/api/pauses/`) sont **en base, par école**, et non plus dans le navigateur. Une pause sans jour vaut pour toute la semaine ; les pauses propres à un jour remplacent celles de la semaine ce jour-là.
 - **Aucun cours ne chevauche une pause**, contrôle fait par le serveur dans les deux sens : un créneau posé sur une pause est refusé (`PlanningSerializer`), et une pause posée sur un cours aussi (`PauseHoraireSerializer`, y compris la suppression de la dernière pause d'un jour). Seules les années non clôturées comptent.
 - Écriture des pauses : SUPER_ADMIN, ADMIN, SCOLARITE, CENSEUR.
@@ -261,7 +263,8 @@ docker compose stop             # arrête sans rien perdre
   - `migrate`, `makemigrations api` ;
   - `test api --noinput` ;
   - `deduire_niveaux_series` : niveaux et séries des classes ; aperçu par défaut, `--appliquer` pour enregistrer ;
-  - `rattacher_donnees_ecoles` : rattache à leur école les données sans école ; aperçu par défaut.
+  - `rattacher_donnees_ecoles` : rattache à leur école les données sans école ; aperçu par défaut ;
+  - `cours_annuels` : passe les cours du primaire et du secondaire en « Année entière » et fusionne les doublons S1/S2 ou T1/T2/T3 ; aperçu par défaut (appliquée le 16/10/2026). À relancer après les anciens seeds (seed_cameroun, seed_complet…), qui créent encore des cours en S1.
 - Vite tourne avec `SMS_VITE_POLLING=true` (sinon les modifications faites sous Windows ne sont pas vues dans le conteneur), et son cache est dans le volume `vite_cache`.
 - Shell : Luc utilise l'Invite de commandes (cmd). Exemple de variable : `set SEED_DEMO=false`, et non `$env:…`.
 
@@ -303,6 +306,10 @@ docker compose stop             # arrête sans rien perdre
 - **Commentaires :** en français, avec séparateurs `# ── Section ───`
 - **Données d'école :** toujours via `EtablissementFilterMixin` ou `EtablissementParRelationMixin` (§7)
 - **Calculs de notes :** uniquement dans `api/notes.py` (§8)
+- **Recherche :** une barre de recherche doit filtrer toutes les données, pas seulement les lignes chargées. Tableau chargé par tranches = recherche serveur (`onServerSearch` → `?search=`), avec des `search_fields` couvrant les colonnes affichées. Le filtre `api/recherche.py` (`RechercheAvecLibelles`, par défaut) trouve aussi les libellés des champs à choix (« Payé » → PAYE). Recherche locale de `CrudTable` : insensible aux accents, porte sur le texte affiché, même en JSX.
+- **Langues (FR / EN) :** aucun texte d'interface écrit en dur. Texte partagé → `i18n/fr.js` et `en.js` (`t`). Texte propre à une page → `const tr = useTr()` puis `tr('Texte', 'Text')` (`hooks/useTr.js`). Hors composant React (utils) → `getLang()` de `services/lang.js`. Le serveur renvoie des codes (MATIN, PAYE…), traduits par l'interface.
+- **Clés de lignes :** `CrudTable` choisit un champ unique (`rowKey` pour l'imposer). Jamais de champ partagé (code_classe, mle_etudiant d'un paiement) : des lignes périmées resteraient affichées.
+- **Tableaux :** pas de boutons de page, défilement infini dans un cadre de hauteur fixe (`.sms-table-wrap`, `index.css`). Avec `CrudTable` en mode serveur, la page parente charge `page_size = TAILLE × page` et `page = 1` : `onServerPage(n)` demande les n premières tranches, et un rechargement renvoie donc toutes les lignes à jour.
 - **Commandes de données :** aperçu par défaut, enregistrement avec `--appliquer`
 - **Tests :** dans `backend/api/tests/` ; lancer toute la suite avant de considérer un changement terminé
 

@@ -227,17 +227,20 @@ export default function Payments() {
   }, [anneeActive, depFilter, spFilter, statsVersion]);
 
   // Réinitialise la page quand les filtres changent
-  useEffect(() => { setPage(1); }, [anneeActive?.code_annee, depFilter, spFilter]);
+  const [serverSearch, setServerSearch] = useState('');
+  useEffect(() => { setPage(1); }, [anneeActive?.code_annee, depFilter, spFilter, serverSearch]);
 
   const { data, count, loading, error, reload } = useApi(
     () => paiementService.list({
-      page,
-      page_size: PAGE_SIZE,
+      // Défilement infini : les `page` premières tranches.
+      page: 1,
+      page_size: PAGE_SIZE * page,
       ...(anneeActive ? { code_annee: anneeActive.code_annee } : {}),
       ...(depFilter   ? { code_dep:   depFilter   } : {}),
       ...(spFilter    ? { code_sp:    spFilter    } : {}),
+      ...(serverSearch ? { search:    serverSearch } : {}),
     }),
-    [anneeActive, depFilter, spFilter, page]
+    [anneeActive, depFilter, spFilter, page, serverSearch]
   );
   const { mutate: create } = useMutation(useCallback((d) => paiementService.create(d), []));
   const { mutate: update } = useMutation(useCallback((d) => paiementService.update(d.code_paiement, d), []));
@@ -404,6 +407,11 @@ export default function Payments() {
         sortBy={r => r.nom_etudiant || r.mle_etudiant || ''}
         icon="fas fa-credit-card" columns={COLS} data={data || []} addLabel={t.common.add}
         totalCount={count}
+        serverSide
+        serverPage={page}
+        serverPages={totalPages}
+        onServerPage={setPage}
+        onServerSearch={setServerSearch}
         exportCsvUrl={`/api/paiements/export-csv/${[depFilter && `code_dep=${depFilter}`, spFilter && `code_sp=${spFilter}`].filter(Boolean).join('&') ? '?' + [depFilter && `code_dep=${depFilter}`, spFilter && `code_sp=${spFilter}`].filter(Boolean).join('&') : ''}`}
         filters={
           <div className="flex gap-2 items-center" style={{ flexWrap: 'wrap' }}>
@@ -433,33 +441,6 @@ export default function Payments() {
         onDelete={async (d) => { try { await remove(d); toast.success(t.toast.deleted); reload(); reloadStats(); } catch (e) { toast.error(e.message); } }}
         renderForm={p => <Form {...p} showSoutenances={labels.showSoutenances} isPreBac={labels.isPreBac} labels={labels} />}
       />
-
-      {/* Pagination serveur */}
-      {totalPages > 1 && (
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:12, padding:'0 4px' }}>
-          <span style={{ fontSize:12, color:'var(--text-muted)' }}>
-            Page {page} / {totalPages} &mdash; {count} résultats
-          </span>
-          <div style={{ display:'flex', gap:6 }}>
-            <button className="sms-btn sms-btn-outline sms-btn-sm"
-              onClick={() => setPage(1)} disabled={page === 1}>
-              <i className="fas fa-angle-double-left"></i>
-            </button>
-            <button className="sms-btn sms-btn-outline sms-btn-sm"
-              onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
-              <i className="fas fa-chevron-left"></i> Préc.
-            </button>
-            <button className="sms-btn sms-btn-outline sms-btn-sm"
-              onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
-              Suiv. <i className="fas fa-chevron-right"></i>
-            </button>
-            <button className="sms-btn sms-btn-outline sms-btn-sm"
-              onClick={() => setPage(totalPages)} disabled={page === totalPages}>
-              <i className="fas fa-angle-double-right"></i>
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Modal envoi email */}
       {emailModal && (

@@ -15,6 +15,8 @@ const en = {
     grades:       'Grades',
     payments:     'Payments',
     planning:     'Schedule',
+    vieScolaire:  'School life',
+    coefficients: 'Coefficients',
     users:        'Users',
     profile:      'Profile',
     logout:       'Log out',
@@ -181,6 +183,8 @@ const en = {
     moyenne:           'Average',
     // Pagination and bulk actions
     of:                'of',
+    loadingMore:       'Loading…',
+    scrollForMore:     'Scroll down to see more',
     perPage:           'Per page:',
     element:           'item',
     elements:          'items',

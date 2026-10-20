@@ -62,11 +62,11 @@ export function etabLabels(typeEtab = 'SUPERIEUR', systeme = 'FRANCOPHONE', lang
     isPreBac ? (isEN ? 'Term' : 'Trimestre')
              : (isEN ? 'Semester' : 'Semestre');
 
+  // Valeurs de Cours.semestre. Primaire / secondaire : un seul emploi du temps par classe
+  // et par année, le cours vaut pour l'année entière (les trimestres ne servent qu'aux notes).
   const semestres = isPreBac
     ? [
-        { value: 'T1', label: isEN ? 'Term 1' : 'Trimestre 1' },
-        { value: 'T2', label: isEN ? 'Term 2' : 'Trimestre 2' },
-        { value: 'T3', label: isEN ? 'Term 3' : 'Trimestre 3' },
+        { value: 'AN', label: isEN ? 'Whole year' : 'Année entière' },
       ]
     : [
         { value: 'S1', label: isEN ? 'Semester 1' : 'Semestre 1' },

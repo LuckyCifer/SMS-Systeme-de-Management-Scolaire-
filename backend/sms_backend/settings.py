@@ -153,7 +153,7 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_FILTER_BACKENDS': (
         'django_filters.rest_framework.DjangoFilterBackend',
-        'rest_framework.filters.SearchFilter',
+        'api.recherche.RechercheAvecLibelles',  # ?search= trouve aussi les libellés des codes
         'rest_framework.filters.OrderingFilter',
     ),
     'DEFAULT_PAGINATION_CLASS': 'api.pagination.SmsPagination',

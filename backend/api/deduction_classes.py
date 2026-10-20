@@ -32,7 +32,9 @@ _NIVEAUX = [
     (r'\b(class|grade)\s*([1-6])\b',            'G{1}_EN', None),
 ]
 
-_SERIES_FR = r'\b(TI|A|C|D|E)\d*\b'
+# Série, puis éventuellement la langue des littéraires (« AE » = A Espagnol, AA Allemand, AC
+# Chinois, AL Latin) et un numéro de classe (« C2 ») : « 2nde AE », « 1ère D2 », « Tle C1 ».
+_SERIES_FR = r'\b(?:(A)[AECL]?|(TI|C|D|E))\d*\b'
 _LANGUES = [(r'\ball(emand)?\b', 'ALLEMAND'), (r'\besp(agnol)?\b', 'ESPAGNOL'),
             (r'\blat(in)?\b', 'LATIN'), (r'\bchi(nois)?\b', 'CHINOIS')]
 
@@ -76,7 +78,7 @@ def deduire_niveau_serie(lib_classe):
         apres = re.split(r'(?i)2nde|2nd|2de|seconde|1[èe]re|1re|premi[èe]re|tle|terminale|term', lib_classe, maxsplit=1)
         m = re.search(_SERIES_FR, apres[-1]) if len(apres) > 1 else None
         if m:
-            serie = m.group(1)
+            serie = m.group(1) or m.group(2)
         else:
             remarque = 'Série à compléter'
     return {'niveau': niveau, 'serie': serie, 'remarque': remarque}

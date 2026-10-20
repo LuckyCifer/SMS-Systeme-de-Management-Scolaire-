@@ -3,6 +3,10 @@
  * Fiches de notes et Mon dossier. Les calculs (moyennes, rangs) restent côté backend
  * (api/notes.py) ; seule l'appréciation d'une note en cours de saisie est déduite ici.
  */
+import { getLang } from '../services/lang';
+
+// Texte selon la langue courante (lue à chaque appel : ces aides sont appelées au rendu).
+const tr = (fr, en) => (getLang() === 'en' ? en : fr);
 
 export const APPRECIATION_BADGE = { A: 'badge-success', ECA: 'badge-warning', NA: 'badge-danger' };
 
@@ -16,10 +20,16 @@ export const SERIES_PAR_NIVEAU = {
   '2NDE_FR': SERIES_FR, '1ERE_FR': SERIES_FR, 'TLE_FR': SERIES_FR,
   'LS_EN': SERIES_EN, 'US_EN': SERIES_EN,
 };
-export const LIB_SERIE = {
-  ALLEMAND: 'Allemand', ESPAGNOL: 'Espagnol', LATIN: 'Latin', CHINOIS: 'Chinois',
-  A: 'Série A', C: 'Série C', D: 'Série D', E: 'Série E', TI: 'Série TI', ARTS: 'Arts', SCIENCE: 'Science',
+const LIBELLES_SERIE = {
+  ALLEMAND: ['Allemand', 'German'], ESPAGNOL: ['Espagnol', 'Spanish'], LATIN: ['Latin', 'Latin'],
+  CHINOIS: ['Chinois', 'Chinese'], A: ['Série A', 'Series A'], C: ['Série C', 'Series C'],
+  D: ['Série D', 'Series D'], E: ['Série E', 'Series E'], TI: ['Série TI', 'Series TI'],
+  ARTS: ['Arts', 'Arts'], SCIENCE: ['Science', 'Science'],
 };
+// LIB_SERIE[code] donne le libellé dans la langue courante (accesseurs évalués à la lecture).
+export const LIB_SERIE = Object.defineProperties({}, Object.fromEntries(
+  Object.entries(LIBELLES_SERIE).map(([code, [fr, en]]) => [code, { get: () => tr(fr, en), enumerable: true }])
+));
 
 // Primaire : 00-09/20 → NA, 10-14/20 → ECA, 15-20/20 → A (même règle que api/notes.py).
 export const appreciationDepuisNote = note => {
@@ -33,6 +43,10 @@ export const appreciationDepuisNote = note => {
 // « 2e ex æquo » quand plusieurs élèves partagent la même moyenne.
 export const rangLabel = r => {
   if (r?.rang === null || r?.rang === undefined) return '—';
+  if (getLang() === 'en') {
+    const n = r.rang, fin = n % 100 >= 11 && n % 100 <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] || 'th');
+    return `${n}${fin}${r.ex_aequo ? ' (tied)' : ''}`;
+  }
   return `${r.rang}${r.rang === 1 ? 'er' : 'e'}${r.ex_aequo ? ' ex æquo' : ''}`;
 };
 
@@ -47,7 +61,7 @@ export const periodeOptions = (periodes = []) => {
   const annees = [...new Set(periodes.filter(p => p.code_annee).map(p => p.code_annee))].sort().reverse();
   const options = [];
   annees.forEach(code => {
-    options.push({ value: `annee:${code}`, label: `Année complète ${code}` });
+    options.push({ value: `annee:${code}`, label: `${tr('Année complète', 'Full year')} ${code}` });
     periodes.filter(p => p.code_annee === code && !p.periode_parent).sort(byDate).forEach(racine => {
       // L'année figure dans chaque libellé : les mêmes trimestres et séquences existent
       // chaque année, et le sélecteur (avec recherche) ne montre pas le regroupement.

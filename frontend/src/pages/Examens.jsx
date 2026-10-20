@@ -139,7 +139,7 @@ export default function Examens() {
 
   const { data, count, loading, error, reload } = useApi(
     () => examenService.list({
-      page_size: PAGE_SIZE, page,
+      page_size: PAGE_SIZE * page, page: 1,  // défilement infini : les `page` premières tranches
       ...(serverSearch ? { search: serverSearch } : {}),
     }),
     [page, serverSearch]

@@ -592,6 +592,20 @@ class CoursSerializer(serializers.ModelSerializer):
     class Meta:
         model = Cours
         fields = '__all__'
+        extra_kwargs = {'semestre': {'required': False}}
+
+    def validate(self, data):
+        # Primaire / secondaire : un seul emploi du temps par classe et par année, le cours
+        # vaut pour l'année entière. Supérieur : semestre 1 ou 2.
+        from .mixins import type_etab_courant
+        type_etab = type_etab_courant(self.context['request'])
+        if type_etab in ('PRIMAIRE', 'SECONDAIRE'):
+            data['semestre'] = 'AN'
+        else:
+            semestre = data.get('semestre', getattr(self.instance, 'semestre', None))
+            if semestre not in ('S1', 'S2'):
+                raise serializers.ValidationError({'semestre': "Choisissez le semestre 1 ou 2."})
+        return data
 
 class PeriodeSerializer(serializers.ModelSerializer):
     lib_annee  = serializers.CharField(source='code_annee.lib_annee', read_only=True)

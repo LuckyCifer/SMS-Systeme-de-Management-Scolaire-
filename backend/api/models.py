@@ -989,9 +989,11 @@ class Qualification(models.Model):
         db_table = 'qualification'
 
 class Cours(models.Model):
-    """Attribution : matière enseignée à une classe pour un semestre (supérieur) ou un
-    trimestre (primaire / secondaire — voir etabLabels.semestres côté frontend)."""
+    """Attribution : matière enseignée à une classe pour un semestre (supérieur) ou pour
+    toute l'année (primaire / secondaire : un seul emploi du temps par classe et par année).
+    T1/T2/T3 ne sont plus utilisés (voir la commande cours_annuels)."""
     SEMESTRE_CHOICES = [
+        ('AN', 'Année entière'),
         ('S1', 'Semestre 1'),
         ('S2', 'Semestre 2'),
         ('T1', 'Trimestre 1'),

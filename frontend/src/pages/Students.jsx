@@ -7,6 +7,7 @@ import api from '../services/api';
 import { CrudTable, FormField } from '../components/CrudTable';
 import SearchableSelect from '../components/SearchableSelect';
 import { useApp } from '../context/AppContext';
+import { useTr } from '../hooks/useTr';
 import { usePdfPreview } from '../context/PdfPreviewContext';
 import { useApi } from '../hooks/useApi';
 import { etudiantService } from '../services/endpoints';
@@ -142,6 +143,7 @@ const fkVal = (v, key) => {
 // ── Formulaire ───────────────────────────────────────────────────────────────
 function Form({ item, onClose, onSave, labels }) {
   const { t, toast } = useApp();
+  const tr = useTr();
   const [departements, setDepartements] = useState([]);
   const [specialites,  setSpecialites]  = useState([]);
   const [filteredSp,   setFilteredSp]   = useState([]);
@@ -282,10 +284,11 @@ function Form({ item, onClose, onSave, labels }) {
         <FormField label={t.fields.email}    name="email"    type="email" value={f.email}    onChange={ch} onBlur={bl} placeholder={PH.email} error={errors.email} />
         <FormField label={t.fields.domicile} name="domicile" value={f.domicile} onChange={ch} placeholder={PH.domicile} help="Adresse du logement actuel de l'étudiant (différente de l'adresse d'origine)" />
       </div>
-      <FormField label="Compte de connexion" name="utilisateur" type="select"
+      <FormField label={tr('Compte de connexion', 'Login account')} name="utilisateur" type="select"
         value={f.utilisateur} onChange={ch}
         options={comptes.map(c => ({ value: c.login, label: c.nom_user ? `${c.login} — ${c.nom_user}` : c.login }))}
-        help="Compte utilisateur (rôle Élève) associé : l'élève ne verra que ses propres notes, absences et paiements." />
+        help={tr("Compte utilisateur (rôle Élève) associé : l'élève ne verra que ses propres notes, absences et paiements.",
+                 'Linked user account (Student role): the student will only see their own grades, absences and payments.')} />
       <div className="sms-form-row">
         <FormField label={t.fields.pere}   name="nom_pere"   value={f.nom_pere}   onChange={ch} />
         <FormField label={t.fields.mere}   name="nom_mere"   value={f.nom_mere}   onChange={ch} />
@@ -328,7 +331,7 @@ export default function Students() {
 
   const { data, count, loading, error, reload } = useApi(
     () => etudiantService.list({
-      page_size: 25, page,
+      page_size: 25 * page, page: 1,  // défilement infini : les `page` premières tranches
       ...(depFilter    ? { code_dep:    depFilter    } : {}),
       ...(spFilter     ? { code_sp:     spFilter     } : {}),
       ...(niveauFilter ? { code_niveau: niveauFilter } : {}),
@@ -485,6 +488,7 @@ export default function Students() {
       addLabel={t.common.add}
       exportCsvUrl={`/api/etudiants/export-xlsx/${[depFilter && `code_dep=${depFilter}`, spFilter && `code_sp=${spFilter}`, niveauFilter && `code_niveau=${niveauFilter}`].filter(Boolean).join('&') ? '?' + [depFilter && `code_dep=${depFilter}`, spFilter && `code_sp=${spFilter}`, niveauFilter && `code_niveau=${niveauFilter}`].filter(Boolean).join('&') : ''}`}
       onBulkDelete={handleBulkDelete}
+      rowKey="mle_etudiant"
       filters={
         <div className="flex gap-2 items-center" style={{ flexWrap: 'wrap', gap: 8 }}>
           {/* Filtre genre */}

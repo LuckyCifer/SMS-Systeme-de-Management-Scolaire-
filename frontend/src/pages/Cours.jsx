@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import api from '../services/api';
 import { CrudTable, FormField } from '../components/CrudTable';
 import { useApp } from '../context/AppContext';
+import { useTr } from '../hooks/useTr';
 import { useApi, useMutation } from '../hooks/useApi';
 import {
   coursService, matiereService, classeService,
@@ -14,6 +15,7 @@ import { etabLabels } from '../utils/etabLabels';
 // ── Formulaire ────────────────────────────────────────────────────────────────
 export function CoursForm({ item, onClose, onSave, labels }) {
   const { t } = useApp();
+  const tr = useTr();
   const [f, setF] = useState({
     code_matiere:  item?.code_matiere  || '',
     code_classe:   item?.code_classe   || '',
@@ -65,12 +67,14 @@ export function CoursForm({ item, onClose, onSave, labels }) {
             label: `${e.nom_ens} ${e.prenom_ens || ''}`.trim(),
           }))}
         />
-        {/* Semestre (supérieur) ou Trimestre (secondaire/primaire) */}
-        <FormField
-          label={labels.semestreLabel} name="semestre" type="select"
-          value={f.semestre} onChange={ch} required
-          options={labels.semestres}
-        />
+        {/* Semestre au supérieur ; au primaire et au secondaire, le cours vaut pour l'année. */}
+        {labels.isSuperieur && (
+          <FormField
+            label={labels.semestreLabel} name="semestre" type="select"
+            value={f.semestre} onChange={ch} required
+            options={labels.semestres}
+          />
+        )}
       </div>
 
       <div className="sms-form-row">
@@ -97,15 +101,16 @@ export function CoursForm({ item, onClose, onSave, labels }) {
       </div>
       {!labels.showCredits && (
         <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '0 0 10px' }}>
-          <i className="fas fa-info-circle"></i> Le coefficient de la matière se règle par niveau et par série
-          dans la page <strong>Coefficients</strong>.
+          <i className="fas fa-info-circle"></i> {tr('Le coefficient de la matière se règle par niveau et par série dans la page ',
+                                                      "The subject's coefficient is set by level and series on the ")}
+          <strong>{t.nav.coefficients}</strong>{tr('.', ' page.')}
         </p>
       )}
       {/* Note éliminatoire — supérieur : en dessous, pas de validation par compensation */}
       {labels.isSuperieur && (
         <FormField
-          label="Note éliminatoire (/20)" name="note_elim" type="number"
-          value={f.note_elim} onChange={ch} placeholder="Vide = aucune (ex : 7)"
+          label={tr('Note éliminatoire (/20)', 'Elimination mark (/20)')} name="note_elim" type="number"
+          value={f.note_elim} onChange={ch} placeholder={tr('Vide = aucune (ex : 7)', 'Empty = none (e.g. 7)')}
         />
       )}
 
@@ -135,6 +140,7 @@ export function CoursForm({ item, onClose, onSave, labels }) {
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function Cours() {
   const { t, toast, anneeActive, lang } = useApp();
+  const tr = useTr();
   const { typeEtab, systeme } = useEtablissement();
   const labels = etabLabels(typeEtab, systeme, lang);
 
@@ -198,16 +204,16 @@ export default function Cours() {
     { key: 'lib', label: t.fields.matiere,     bold: true, render: r => r.lib_matiere || '—' },
     { key: 'cls', label: t.fields.classe,      render: r => r.lib_classe || r.code_classe },
     { key: 'ens', label: t.fields.enseignant,  render: r => r.nom_ens || '—' },
-    { key: 'sem', label: labels.semestreLabel, searchValue: r => r.semestre, render: r => (
+    ...(labels.isSuperieur ? [{ key: 'sem', label: labels.semestreLabel, searchValue: r => r.semestre, render: r => (
       <span className="sms-badge badge-info">{r.semestre || '—'}</span>
-    )},
+    )}] : []),
     { key: 'ann', label: t.common.colYear,     render: r => r.lib_annee || r.code_annee || '—' },
     { key: 'qh',  label: t.pages.courses.quotaCol, render: r => r.quota_horaire ?? '—' },
     // Poids : crédits et note éliminatoire (supérieur) ; coefficients dans Paramétrage
     ...(labels.showCredits ? [{
       key: 'cr', label: t.fields.credits, render: r => r.credits ?? '—',
     }, {
-      key: 'elim', label: 'Note élim.', render: r => r.note_elim ?? '—',
+      key: 'elim', label: tr('Note élim.', 'Elim. mark'), render: r => r.note_elim ?? '—',
     }] : []),
     // Groupes amphi — supérieur uniquement
     ...(labels.showGroupes ? [{

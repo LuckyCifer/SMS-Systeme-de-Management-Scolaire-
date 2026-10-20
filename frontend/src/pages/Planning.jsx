@@ -12,6 +12,7 @@ import {
   jourService, salleService, classeService,
 } from '../services/endpoints';
 import { getUser } from '../utils/Auth';
+import { useTr } from '../hooks/useTr';
 import SearchableSelect from '../components/SearchableSelect';
 import { useEtablissement } from '../hooks/useEtablissement';
 import { etabLabels } from '../utils/etabLabels';
@@ -178,7 +179,7 @@ function PlanningForm({ item, onClose, onSave, labels }) {
       if (cancelled) return;
       setEditedCoursOpt({
         value: c.id,
-        label: `${c.lib_matiere || c.code_matiere} · ${c.lib_classe || c.code_classe} · ${c.semestre}`,
+        label: `${c.lib_matiere || c.code_matiere} · ${c.lib_classe || c.code_classe}${c.semestre && c.semestre !== 'AN' ? ` · ${c.semestre}` : ''}`,
       });
     }).catch(() => {});
     return () => { cancelled = true; };
@@ -207,7 +208,7 @@ function PlanningForm({ item, onClose, onSave, labels }) {
           ...(editedCoursOpt ? [editedCoursOpt] : []),
           ...(cours || []).map(c => ({
             value: c.id,
-            label: `${c.lib_matiere || c.code_matiere} · ${c.lib_classe || c.code_classe} · ${c.semestre}`,
+            label: `${c.lib_matiere || c.code_matiere} · ${c.lib_classe || c.code_classe}${c.semestre && c.semestre !== 'AN' ? ` · ${c.semestre}` : ''}`,
           })),
         ]}
       />
@@ -331,6 +332,7 @@ const messageErreur = e => {
 
 function PausesModal({ pauses, onClose, onChanged }) {
   const { t, toast } = useApp();
+  const tr = useTr();
   const tp = t.pages.planning;
   const canEdit = ROLES_GESTION_PAUSES.includes(getUser()?.role);
   const [form, setForm]     = useState(PAUSE_VIDE);
@@ -428,7 +430,7 @@ function PausesModal({ pauses, onClose, onChanged }) {
               <div>
                 <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>{tp.labelField}</div>
                 <input className="sms-input" name="libelle" value={form.libelle} onChange={ch}
-                  placeholder="Récréation" maxLength={30} />
+                  placeholder={tr('Récréation', 'Recess')} maxLength={30} />
               </div>
               <div>
                 <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>{tp.startField}</div>
@@ -495,12 +497,13 @@ export default function Planning() {
       // Charge tout pour le filtre actif (max 200 créneaux par classe = bien suffisant)
       const params = { page_size: 200 };
       if (classeFilter)   params['code_cours__code_classe'] = classeFilter;
-      if (semestreFilter) params['code_cours__semestre']    = semestreFilter;
+      // Supérieur : un emploi du temps par semestre. Primaire / secondaire : un seul par année.
+      if (labels.isSuperieur && semestreFilter) params['code_cours__semestre'] = semestreFilter;
       // Emploi du temps de l'année affichée dans le bandeau uniquement.
       if (anneeActive?.code_annee) params['code_cours__code_annee'] = anneeActive.code_annee;
       return planningService.list(params);
-    }, [classeFilter, semestreFilter, anneeActive?.code_annee]),
-    [classeFilter, semestreFilter, anneeActive?.code_annee]
+    }, [classeFilter, semestreFilter, anneeActive?.code_annee, labels.isSuperieur]),
+    [classeFilter, semestreFilter, anneeActive?.code_annee, labels.isSuperieur]
   );
   const { data: classes } = useApi(
     useCallback(() => classeService.list({ page_size: 200 }), [])
@@ -641,7 +644,9 @@ export default function Planning() {
     const jourFr = JOURS_FR.find(j => JOUR_FR_TO_CODE[j] === formData.code_jour);
     const candidates = formData.type_planning === 'HEBDO' && jourFr ? getPausesForDay(jourFr) : pauses;
     const p = candidates.find(p => h_debut < hm(p.h_fin) && h_fin > hm(p.h_debut));
-    return p ? `Ce créneau empiète sur la pause « ${p.libelle} » (${hm(p.h_debut)} – ${hm(p.h_fin)}).` : null;
+    return p ? (lang === 'en'
+      ? `This slot overlaps the break "${p.libelle}" (${hm(p.h_debut)} – ${hm(p.h_fin)}).`
+      : `Ce créneau empiète sur la pause « ${p.libelle} » (${hm(p.h_debut)} – ${hm(p.h_fin)}).`) : null;
   };
 
   const handleSave = async formData => {
@@ -664,7 +669,9 @@ export default function Planning() {
     const classeLabel   = (classes || []).find(c => c.code_classe === classeFilter)?.lib_classe || classeFilter || '';
     const allOpts = [...labels.semestres];
     const found = allOpts.find(o => o.value === semestreFilter);
-    const semestreLabel = found?.label || '';
+    const semestreLabel = labels.isSuperieur
+      ? (found?.label || '')
+      : (anneeActive?.lib_annee || anneeActive?.code_annee || '');
     const joursLabels   = JOURS_FR.map(j => t.common.jours[JOUR_FR_TO_CODE[j]] || j);
     const win = window.open('', '_blank');
     if (!win) { toast.error(t.pages.planning.popupBlocked); return; }
@@ -730,9 +737,9 @@ export default function Planning() {
 
           {/* Générer séances (1 semaine, HEBDO uniquement) */}
           <button className="sms-btn sms-btn-outline" onClick={() => setGenModal(true)}
-            title="Générer les séances de la semaine depuis le planning"
+            title={lang === 'en' ? "Generate the week's lessons from the timetable" : 'Générer les séances de la semaine depuis le planning'}
             style={{ borderColor: 'rgba(66,165,245,.4)', color: '#42a5f5' }}>
-            <i className="fas fa-magic"></i> Générer séances
+            <i className="fas fa-magic"></i> {lang === 'en' ? 'Generate lessons' : 'Générer séances'}
           </button>
 
           {/* Générer toute la période (HEBDO + INTENSIF) */}
@@ -861,15 +868,15 @@ export default function Planning() {
             placeholder={t.common.allClasses}
           />
         </div>
-        <select className="sms-input" style={{ height: 36, minWidth: 130 }}
-          value={semestreFilter} onChange={e => setSemestreFilter(e.target.value)}>
-          <option value="">
-            {labels.isPreBac ? t.pages.planning.allTrimesters : t.pages.planning.allSemesters}
-          </option>
-          {labels.semestres.map(opt => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
-          ))}
-        </select>
+        {labels.isSuperieur && (
+          <select className="sms-input" style={{ height: 36, minWidth: 130 }}
+            value={semestreFilter} onChange={e => setSemestreFilter(e.target.value)}>
+            <option value="">{t.pages.planning.allSemesters}</option>
+            {labels.semestres.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       {/* ── Compteurs rapides ── */}
@@ -914,7 +921,7 @@ export default function Planning() {
                 {t.pages.planning.selectClassTip}
               </div>
             </div>
-          ) : !semestreFilter ? (
+          ) : labels.isSuperieur && !semestreFilter ? (
             // Une grille hebdomadaire ne peut représenter qu'une seule période à la fois :
             // deux semestres/trimestres ne se déroulent pas simultanément dans l'année, mais
             // leurs créneaux peuvent tomber sur le même jour/heure et se superposer visuellement
@@ -1155,7 +1162,7 @@ export default function Planning() {
                       </td>
                       <td><strong>{p.lib_matiere || '—'}</strong></td>
                       <td>{p.lib_classe || '—'}</td>
-                      <td><span className="sms-badge badge-info">{p.semestre || '—'}</span></td>
+                      <td><span className="sms-badge badge-info">{p.semestre === 'AN' ? labels.semestres[0].label : (p.semestre || '—')}</span></td>
                       <td>{p.nom_ens || '—'}</td>
                       <td>
                         {p.groupes

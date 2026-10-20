@@ -15,7 +15,7 @@ Ce qui est créé (les données 2025-2026 ne sont pas modifiées) :
   - séances depuis la rentrée (14/09/2026) jusqu'à aujourd'hui, absences et retards
     (dont 3 élèves très absents, pour les alertes), appel journalier de la semaine ;
   - fiches de notes de la séquence 1 (validées, soumises ou en brouillon), notes reportées,
-    séquence 1 clôturée pour la Terminale A ;
+    séquence 1 clôturée pour la Tle AE ;
   - parents, paiements APEE et frais d'examen officiel, factures, échéanciers ;
   - examens (compositions, BEPC/Probatoire/Bac blancs, GCE mock) et convocations ;
   - cartes scolaires, comptes enseignants et 3 comptes élèves reliés à leur fiche.
@@ -53,14 +53,14 @@ CLASSES = {
     'MBD_4EB':   ('4ème B', '4EME_FR', 'ALLEMAND', 'FRANCOPHONE'),
     'MBD_3EA':   ('3ème A', '3EME_FR', 'ESPAGNOL', 'FRANCOPHONE'),
     'MBD_3EB':   ('3ème B', '3EME_FR', 'ALLEMAND', 'FRANCOPHONE'),
-    'MBD_2NDA':  ('2nde A', '2NDE_FR', 'A', 'FRANCOPHONE'),
+    'MBD_2NDA':  ('2nde AE', '2NDE_FR', 'A', 'FRANCOPHONE'),
     'MBD_2NDC':  ('2nde C', '2NDE_FR', 'C', 'FRANCOPHONE'),
-    'MBD_1EREA': ('1ère A', '1ERE_FR', 'A', 'FRANCOPHONE'),
+    'MBD_1EREA': ('1ère AE', '1ERE_FR', 'A', 'FRANCOPHONE'),
     'MBD_1EREC': ('1ère C', '1ERE_FR', 'C', 'FRANCOPHONE'),
     'MBD_1ERED': ('1ère D', '1ERE_FR', 'D', 'FRANCOPHONE'),
-    'MBD_TLEA':  ('Terminale A', 'TLE_FR', 'A', 'FRANCOPHONE'),
-    'MBD_TLEC':  ('Terminale C', 'TLE_FR', 'C', 'FRANCOPHONE'),
-    'MBD_TLED':  ('Terminale D', 'TLE_FR', 'D', 'FRANCOPHONE'),
+    'MBD_TLEA':  ('Tle AE', 'TLE_FR', 'A', 'FRANCOPHONE'),
+    'MBD_TLEC':  ('Tle C', 'TLE_FR', 'C', 'FRANCOPHONE'),
+    'MBD_TLED':  ('Tle D', 'TLE_FR', 'D', 'FRANCOPHONE'),
     'MBD_F1A':   ('Form 1 A', 'F1_EN', None, 'ANGLOPHONE'),
     'MBD_F2A':   ('Form 2 A', 'F2_EN', None, 'ANGLOPHONE'),
     'MBD_F3A':   ('Form 3 A', 'F3_EN', None, 'ANGLOPHONE'),
@@ -260,7 +260,7 @@ class Command(BaseCommand):
                 if ens is None:
                     ens = self._nouvel_enseignant(matiere)
                     pool.setdefault(matiere, []).append(ens)
-                cours = Cours.objects.create(code_matiere_id=matiere, code_classe=classe, mle_ens=ens, semestre='T1',
+                cours = Cours.objects.create(code_matiere_id=matiere, code_classe=classe, mle_ens=ens, semestre='AN',
                                              code_annee=self.annee, quota_horaire=besoin * 2 * 30, credits=0, etablissement=self.etab)
                 self.cours.append(cours)
                 # Créneaux répartis sur des jours différents autant que possible.
@@ -393,7 +393,7 @@ class Command(BaseCommand):
         ClotureNotes.objects.create(etablissement=self.etab, code_classe=self.classes['MBD_TLEA'],
                                     code_periode=self.seq1, cloturee_par='mbd_censeur')
         self.bilan.append(f'Fiches de notes (séquence 1) : {statuts["VALIDE"]} validées, {statuts["SOUMIS"]} soumises, '
-                          f'{statuts["BROUILLON"]} en brouillon ; {reportees} notes reportées ; séquence 1 clôturée en Terminale A')
+                          f'{statuts["BROUILLON"]} en brouillon ; {reportees} notes reportées ; séquence 1 clôturée en Tle AE')
 
     # ── Parents ─────────────────────────────────────────────────────────────────
     def _parents(self):

@@ -8,6 +8,7 @@
 import { useState, useCallback } from 'react';
 import { FormField } from '../components/CrudTable';
 import { useApp } from '../context/AppContext';
+import { useTr } from '../hooks/useTr';
 import { useApi, useMutation } from '../hooks/useApi';
 import { useEtablissement } from '../hooks/useEtablissement';
 import { etabLabels } from '../utils/etabLabels';
@@ -244,6 +245,7 @@ function AnneeForm({ item, onClose, onSave, saving }) {
 
 function PeriodeForm({ item, onClose, onSave, saving, annees, periodes = [], defaultTypeEtab }) {
   const { t } = useApp();
+  const tr = useTr();
   const [f, setF] = useState({
     lib_periode:  item?.lib_periode  || '',
     date_debut:   item?.date_debut?.slice(0, 10) || '',
@@ -278,9 +280,9 @@ function PeriodeForm({ item, onClose, onSave, saving, annees, periodes = [], def
           { value: 'ORDINAIRE',         label: 'Séquence / trimestre ordinaire' },
           { value: 'EXAMENS_OFFICIELS', label: "Période d'examens officiels" },
         ]} />
-      <FormField label="Trimestre parent (séquences du secondaire)" name="periode_parent" type="select"
+      <FormField label={tr('Trimestre parent (séquences du secondaire)', 'Parent term (secondary sequences)')} name="periode_parent" type="select"
         value={f.periode_parent} onChange={ch}
-        help="Laisser vide pour un trimestre ou un semestre."
+        help={tr('Laisser vide pour un trimestre ou un semestre.', 'Leave empty for a term or a semester.')}
         options={parents.map(p => ({ value: p.code_periode, label: `${p.lib_periode} (${p.lib_annee || p.code_annee || '—'})` }))} />
       <FormField label={t.fields.obs} name="obs_periode" value={f.obs_periode} onChange={ch} />
       <FormFooter onClose={onClose} saving={saving} />
@@ -616,6 +618,7 @@ const fmt = n => Number(n || 0).toLocaleString('fr-FR');
 
 function CalendrierTab() {
   const { t, lang, toast, user } = useApp();
+  const tr = useTr();
   const { typeEtab, systeme } = useEtablissement();
   const labels = etabLabels(typeEtab, systeme, lang);
   const { data: annees,   reload: reA } = useApi(useCallback(() => anneeService.list({ page_size: 100 }), []));
@@ -752,8 +755,8 @@ function CalendrierTab() {
           gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
           <i className="fas fa-layer-group" style={{ color: '#42a5f5' }}></i>
           <span style={{ fontSize: 13, flex: '1 1 260px' }}>
-            Créer automatiquement les 6 séquences (2 par trimestre) d'une année scolaire.
-            Les trimestres qui ont déjà des séquences ne sont pas modifiés.
+            {tr("Créer automatiquement les 6 séquences (2 par trimestre) d'une année scolaire. Les trimestres qui ont déjà des séquences ne sont pas modifiés.",
+                'Automatically create the 6 sequences (2 per term) of a school year. Terms that already have sequences are left unchanged.')}
           </span>
           <select className="sms-input" style={{ height: 34, width: 'auto', minWidth: 140, fontSize: 12 }}
             value={anneeSeq} onChange={e => setAnneeSeq(e.target.value)}>
@@ -765,12 +768,12 @@ function CalendrierTab() {
               setGenSeq(true);
               try {
                 const { data } = await periodeService.genererSequences(anneeSeq);
-                toast.success(`${data.creees} séquence(s) créée(s)`);
+                toast.success(tr(`${data.creees} séquence(s) créée(s)`, `${data.creees} sequence(s) created`));
                 reP();
               } catch { toast.error(t.errors.saving); }
               finally { setGenSeq(false); }
             }}>
-            <i className="fas fa-magic"></i> Générer les séquences
+            <i className="fas fa-magic"></i> {tr('Générer les séquences', 'Generate sequences')}
           </button>
         </div>
       )}
@@ -779,7 +782,7 @@ function CalendrierTab() {
         formProps={{ annees: annees || [], periodes: periodes || [], defaultTypeEtab: typeEtab }}
         columns={[
           { label: t.common.colLabel,  render: r => <strong>{r.lib_periode}</strong> },
-          { label: "Trimestre",        render: r => r.lib_parent
+          { label: tr('Trimestre', 'Term'), render: r => r.lib_parent
               ? <span style={{ fontSize: 11 }}><i className="fas fa-level-up-alt fa-rotate-90" style={{ marginRight: 4, opacity: .6 }}></i>{r.lib_parent}</span>
               : <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>—</span> },
           { label: t.common.colStart,  render: r => r.date_debut?.slice(0, 10) || '—' },

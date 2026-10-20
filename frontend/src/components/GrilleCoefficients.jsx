@@ -11,15 +11,18 @@ import { useApp } from '../context/AppContext';
 import { useApi } from '../hooks/useApi';
 import { useEtablissement } from '../hooks/useEtablissement';
 import { getUser } from '../utils/Auth';
+import { useTr } from '../hooks/useTr';
 import { anneeService, niveauScolaireService, matiereService, coefficientService } from '../services/endpoints';
 import { LoadingState } from './ApiState';
-import { LIB_SERIE as LIBELLES_SERIES } from '../utils/notes';
+import { LIB_SERIE } from '../utils/notes';
 
 const ROLES_ECRITURE = ['SUPER_ADMIN', 'ADMIN', 'SCOLARITE', 'CENSEUR'];
-const LIB_SERIE = { '': 'Coefficient', ...LIBELLES_SERIES };
 
 export default function GrilleCoefficients() {
   const { t, toast, anneeActive } = useApp();
+  const tr = useTr();
+  // Libellé d'une colonne de série (sans série : une seule colonne « Coefficient »).
+  const libSerie = s => (s ? (LIB_SERIE[s] || s) : 'Coefficient');
   // Grille de l'école connectée (celle du compte, ou celle choisie par le SUPER_ADMIN).
   const { etab } = useEtablissement();
   const typeEtab = etab?.type_etab;
@@ -62,7 +65,9 @@ export default function GrilleCoefficients() {
   if (typeEtab === 'SUPERIEUR') {
     return (
       <div className="sms-card" style={{ padding: 24, color: 'var(--text-muted)' }}>
-        Au supérieur, le poids d'une matière est son nombre de crédits, saisi dans la page <strong>Cours</strong>.
+        {tr("Au supérieur, le poids d'une matière est son nombre de crédits, saisi dans la page ",
+            "In higher education, a subject's weight is its number of credits, entered on the ")}
+        <strong>{t.nav.courses}</strong>{tr('.', ' page.')}
       </div>
     );
   }
@@ -86,7 +91,8 @@ export default function GrilleCoefficients() {
         code_matiere: l.code_matiere, serie, coef: valeurs[l.code_matiere]?.[serie] ?? '',
       })));
       const { data } = await coefficientService.enregistrer({ code_annee: codeAnnee, niveau_scolaire: niveau, lignes: payload });
-      toast.success(`Grille enregistrée : ${data.crees} ajouté(s), ${data.modifies} modifié(s), ${data.supprimes} retiré(s)`);
+      toast.success(tr(`Grille enregistrée : ${data.crees} ajouté(s), ${data.modifies} modifié(s), ${data.supprimes} retiré(s)`,
+                       `Grid saved: ${data.crees} added, ${data.modifies} updated, ${data.supprimes} removed`));
       charger();
     } catch (err) {
       toast.error(err.response?.data?.error || t.errors.saving);
@@ -98,7 +104,7 @@ export default function GrilleCoefficients() {
   const copier = async () => {
     try {
       const { data } = await coefficientService.copier({ source_annee: source, cible_annee: codeAnnee });
-      toast.success(`${data.copies} coefficient(s) copié(s) depuis ${source}`);
+      toast.success(tr(`${data.copies} coefficient(s) copié(s) depuis ${source}`, `${data.copies} coefficient(s) copied from ${source}`));
       charger();
     } catch (err) {
       toast.error(err.response?.data?.error || t.errors.saving);
@@ -120,7 +126,7 @@ export default function GrilleCoefficients() {
             </select>
           </div>
           <div style={{ flex: '0 1 220px' }}>
-            <label className="sms-label">Niveau</label>
+            <label className="sms-label">{t.fields.niveau}</label>
             <select className="sms-input" value={niveau} onChange={e => setNiveau(e.target.value)}>
               <option value="">{t.common.select}</option>
               {(niveaux || []).map(n => <option key={n.code_niveau} value={n.code_niveau}>{n.lib_niveau}</option>)}
@@ -129,7 +135,7 @@ export default function GrilleCoefficients() {
           {peutModifier && codeAnnee && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginLeft: 'auto' }}>
               <div>
-                <label className="sms-label">Copier la grille de</label>
+                <label className="sms-label">{tr('Copier la grille de', 'Copy the grid from')}</label>
                 <select className="sms-input" value={source} onChange={e => setSource(e.target.value)} style={{ minWidth: 140 }}>
                   <option value="">{t.common.select}</option>
                   {(annees || []).filter(a => a.code_annee !== codeAnnee)
@@ -137,30 +143,31 @@ export default function GrilleCoefficients() {
                 </select>
               </div>
               <button className="sms-btn sms-btn-outline sms-btn-sm" disabled={!source} onClick={copier}
-                title="Copie tous les niveaux ; les cases déjà remplies ne sont pas écrasées">
-                <i className="fas fa-copy"></i> Copier
+                title={tr('Copie tous les niveaux ; les cases déjà remplies ne sont pas écrasées', 'Copies every level; cells already filled in are not overwritten')}>
+                <i className="fas fa-copy"></i> {tr('Copier', 'Copy')}
               </button>
             </div>
           )}
         </div>
         <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '10px 0 0' }}>
-          Un coefficient par matière et par série, valable toute l'année pour toutes les classes de ce niveau.
-          Case vide = matière comptée avec le coefficient 1 (signalé dans la page Notes).
+          {tr("Un coefficient par matière et par série, valable toute l'année pour toutes les classes de ce niveau. Case vide = matière comptée avec le coefficient 1 (signalé dans la page Notes).",
+              'One coefficient per subject and series, valid all year for every class of this level. Empty cell = subject counted with coefficient 1 (flagged on the Grades page).')}
         </p>
       </div>
 
       {!codeAnnee || !niveau ? (
         <div className="sms-card" style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>
-          Choisissez une année et un niveau pour afficher la grille de coefficients de {etab?.lib_etab || 'votre établissement'}.
+          {tr(`Choisissez une année et un niveau pour afficher la grille de coefficients de ${etab?.lib_etab || 'votre établissement'}.`,
+              `Choose a year and a level to display the coefficient grid of ${etab?.lib_etab || 'your school'}.`)}
         </div>
       ) : loading || !grille ? <LoadingState /> : (
         <div className="sms-card">
           {(grille.classes || []).length > 0 && (
             <div style={{ padding: '10px 16px', fontSize: 12, color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
-              Classes concernées : {grille.classes.map(c => `${c.lib_classe}${c.serie ? ` (${LIB_SERIE[c.serie] || c.serie})` : ''}`).join(' · ')}
+              {tr('Classes concernées', 'Classes concerned')} : {grille.classes.map(c => `${c.lib_classe}${c.serie ? ` (${libSerie(c.serie)})` : ''}`).join(' · ')}
               {classesSansSerie.length > 0 && (
                 <div style={{ color: 'var(--warning)', marginTop: 4 }}>
-                  <i className="fas fa-exclamation-triangle"></i> Sans série (coefficient 1 partout tant qu'elle n'est pas renseignée dans Classes) :
+                  <i className="fas fa-exclamation-triangle"></i> {tr("Sans série (coefficient 1 partout tant qu'elle n'est pas renseignée dans Classes) :", 'No series (coefficient 1 everywhere until it is set in Classes):')}
                   {' '}{classesSansSerie.map(c => c.lib_classe).join(', ')}
                 </div>
               )}
@@ -171,19 +178,19 @@ export default function GrilleCoefficients() {
               <thead>
                 <tr>
                   <th>{t.fields.matiere}</th>
-                  {series.map(s => <th key={s} style={{ textAlign: 'center' }}>{LIB_SERIE[s] || s}</th>)}
+                  {series.map(s => <th key={s} style={{ textAlign: 'center' }}>{libSerie(s)}</th>)}
                 </tr>
               </thead>
               <tbody>
                 {lignes.length === 0 ? (
                   <tr><td colSpan={series.length + 1} style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)' }}>
-                    Aucune matière enseignée à ce niveau cette année. Ajoutez-en une ci-dessous.
+                    {tr('Aucune matière enseignée à ce niveau cette année. Ajoutez-en une ci-dessous.', 'No subject taught at this level this year. Add one below.')}
                   </td></tr>
                 ) : lignes.map(l => (
                   <tr key={l.code_matiere}>
                     <td>
                       <strong>{l.lib_matiere}</strong>
-                      {!l.enseignee && <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 6 }}>(aucun cours à ce niveau)</span>}
+                      {!l.enseignee && <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 6 }}>{tr('(aucun cours à ce niveau)', '(no course at this level)')}</span>}
                     </td>
                     {series.map(s => (
                       <td key={s} style={{ textAlign: 'center' }}>
@@ -201,12 +208,12 @@ export default function GrilleCoefficients() {
             <div style={{ display: 'flex', gap: 10, padding: '12px 16px', borderTop: '1px solid var(--border)', alignItems: 'center', flexWrap: 'wrap' }}>
               <select className="sms-input" style={{ width: 'auto', minWidth: 220, height: 34, fontSize: 12 }} value=""
                 onChange={e => e.target.value && setAjoutees(prev => [...prev, e.target.value])}>
-                <option value="">+ Ajouter une matière…</option>
+                <option value="">{tr('+ Ajouter une matière…', '+ Add a subject…')}</option>
                 {disponibles.map(m => <option key={m.code_matiere} value={m.code_matiere}>{m.lib_matiere}</option>)}
               </select>
               <button className="sms-btn sms-btn-primary sms-btn-sm" style={{ marginLeft: 'auto' }} disabled={saving} onClick={enregistrer}>
                 {saving ? <><div className="sms-spinner" style={{ width: 14, height: 14 }}></div> {t.common.loading}</>
-                  : <><i className="fas fa-save"></i> Enregistrer la grille</>}
+                  : <><i className="fas fa-save"></i> {tr('Enregistrer la grille', 'Save grid')}</>}
               </button>
             </div>
           )}

@@ -10,6 +10,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import api from '../services/api';
 import { useApp } from '../context/AppContext';
+import { useTr } from '../hooks/useTr';
 import { usePdfPreview } from '../context/PdfPreviewContext';
 import { useApi } from '../hooks/useApi';
 import { useEtablissement } from '../hooks/useEtablissement';
@@ -41,6 +42,7 @@ const AppreciationBadge = ({ value }) => value
 
 // ── Vue relevé par classe ─────────────────────────────────────────────────────
 function ReleveParClasse({ resultats, isPrimaire, poidsLabel }) {
+  const tr = useTr();
   // Colonnes : matières notées dans la classe, avec leur poids (coefficient / crédits).
   const subjects = useMemo(() => {
     const map = new Map();
@@ -65,14 +67,14 @@ function ReleveParClasse({ resultats, isPrimaire, poidsLabel }) {
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
         <thead>
           <tr style={{ background: 'var(--bg-hover)' }}>
-            <th style={{ ...th, textAlign: 'left', paddingLeft: 12 }}>Rang</th>
+            <th style={{ ...th, textAlign: 'left', paddingLeft: 12 }}>{tr('Rang', 'Rank')}</th>
             <th style={{ ...th, textAlign: 'left' }}>Élève</th>
             {subjects.map(s => (
               <th key={s.code} style={{ ...th, maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis' }} title={s.lib}>
                 {s.lib.length > 10 ? s.lib.slice(0, 10) + '…' : s.lib}
                 {s.poids != null && (
                   <div style={{ fontWeight: 400, textTransform: 'none', color: s.defaut ? 'var(--warning)' : undefined }}
-                    title={s.defaut ? 'Non renseigné : compté pour 1' : undefined}>
+                    title={s.defaut ? tr('Non renseigné : compté pour 1', 'Not set: counted as 1') : undefined}>
                     {poidsLabel} {s.poids}{s.defaut ? ' *' : ''}
                   </div>
                 )}
@@ -97,7 +99,7 @@ function ReleveParClasse({ resultats, isPrimaire, poidsLabel }) {
                         {c.moyenne.toFixed(2)}
                       </span>
                     ) : c?.dispense
-                      ? <span style={{ color: 'var(--text-muted)', fontSize: 10 }} title="Absence justifiée : matière neutralisée">ABS. J</span>
+                      ? <span style={{ color: 'var(--text-muted)', fontSize: 10 }} title={tr('Absence justifiée : matière neutralisée', 'Excused absence: subject not counted')}>{tr('ABS. J', 'EXC.')}</span>
                       : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                     {isPrimaire && c?.appreciation && <> <AppreciationBadge value={c.appreciation} /></>}
                   </td>
@@ -113,7 +115,7 @@ function ReleveParClasse({ resultats, isPrimaire, poidsLabel }) {
           ))}
           <tr style={{ borderTop: '2px solid var(--green)', background: 'rgba(76,175,80,.05)' }}>
             <td colSpan={2} style={{ padding: '8px 12px', fontWeight: 700, fontSize: 11, color: 'var(--green)', textTransform: 'uppercase' }}>
-              Moy. classe
+              {tr('Moy. classe', 'Class avg.')}
             </td>
             {colMeans.map((m, ci) => (
               <td key={ci} style={{ padding: '8px 8px', textAlign: 'center', fontWeight: 700, color: moyColor(m) }}>
@@ -133,11 +135,12 @@ function ReleveParClasse({ resultats, isPrimaire, poidsLabel }) {
 // ── Page principale ───────────────────────────────────────────────────────────
 export default function Grades() {
   const { t, toast, lang } = useApp();
+  const tr = useTr();
   const { showPreview } = usePdfPreview();
   const { typeEtab, systeme } = useEtablissement();
   const labels = etabLabels(typeEtab, systeme, lang);
   const isPrimaire = typeEtab === 'PRIMAIRE';
-  const poidsLabel = labels.isSuperieur ? 'Crédits' : 'Coef.';
+  const poidsLabel = labels.isSuperieur ? tr('Crédits', 'Credits') : tr('Coef.', 'Coef.');
 
   const [mode,      setMode]      = useState('etudiant'); // 'etudiant' | 'classe'
   const [search,    setSearch]    = useState('');
@@ -168,23 +171,27 @@ export default function Grades() {
   const cloture = (clotures || [])[0] || null;
   const basculerCloture = async () => {
     const question = cloture
-      ? 'Rouvrir cette période ? Les notes de la classe redeviendront modifiables.'
-      : 'Clôturer cette période pour la classe (conseil de classe tenu) ? Plus aucune note ne pourra être modifiée sans réouverture.';
+      ? tr('Rouvrir cette période ? Les notes de la classe redeviendront modifiables.',
+           "Reopen this period? The class's grades will be editable again.")
+      : tr('Clôturer cette période pour la classe (conseil de classe tenu) ? Plus aucune note ne pourra être modifiée sans réouverture.',
+           'Close this period for the class (class council held)? No grade can be changed until it is reopened.');
     if (!window.confirm(question)) return;
     try {
       if (cloture) await clotureNotesService.delete(cloture.id);
       else await clotureNotesService.create({ code_classe: classeId, code_periode: codePeriode });
-      toast.success(cloture ? 'Période rouverte.' : 'Période clôturée.');
+      toast.success(cloture ? tr('Période rouverte.', 'Period reopened.') : tr('Période clôturée.', 'Period closed.'));
       reloadClotures();
     } catch (err) {
       toast.error(err.response?.data?.detail || err.response?.data?.error || t.errors.saving);
     }
   };
 
-  const filtered = useMemo(() => resultats.filter(r =>
-    r.nom_etudiant.toLowerCase().includes(search.toLowerCase()) ||
-    r.mle_etudiant.toLowerCase().includes(search.toLowerCase())
-  ), [resultats, search]);
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return resultats.filter(r => !q ||
+      (r.nom_etudiant || '').toLowerCase().includes(q) ||
+      (r.mle_etudiant || '').toLowerCase().includes(q));
+  }, [resultats, search]);
 
   const classe       = (classes || []).find(c => c.code_classe === classeId);
   // Matières sans coefficient (ou sans crédits) : comptées pour 1, à signaler.
@@ -269,7 +276,7 @@ export default function Grades() {
             name="classeId" value={classeId}
             onChange={e => setClasseId(e.target.value)}
             options={(classes || []).map(c => ({ value: c.code_classe, label: c.lib_classe }))}
-            placeholder="— Sélectionner une classe —"
+            placeholder={tr('— Sélectionner une classe —', '— Select a class —')}
           />
         </div>
         <div style={{ minWidth: 260 }}>
@@ -277,28 +284,28 @@ export default function Grades() {
             name="periodeChoice" value={periodeChoice}
             onChange={e => setPeriodeChoice(e.target.value)}
             options={periodeOptions(periodes || [])}
-            placeholder="— Période ou année complète —"
+            placeholder={tr('— Période ou année complète —', '— Period or full year —')}
           />
         </div>
         {classeId && codePeriode && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 6 }}>
             {cloture
-              ? <span className="sms-badge badge-secondary" title={`Clôturée par ${cloture.cloturee_par} le ${cloture.cloturee_le?.slice(0, 10)}`}>
-                  <i className="fas fa-lock"></i> Période clôturée
+              ? <span className="sms-badge badge-secondary" title={tr(`Clôturée par ${cloture.cloturee_par} le ${cloture.cloturee_le?.slice(0, 10)}`, `Closed by ${cloture.cloturee_par} on ${cloture.cloturee_le?.slice(0, 10)}`)}>
+                  <i className="fas fa-lock"></i> {tr('Période clôturée', 'Period closed')}
                 </span>
-              : <span className="sms-badge badge-success"><i className="fas fa-lock-open"></i> Période ouverte</span>}
+              : <span className="sms-badge badge-success"><i className="fas fa-lock-open"></i> {tr('Période ouverte', 'Period open')}</span>}
             {peutCloturer && (
               <button className="sms-btn sms-btn-outline sms-btn-sm" onClick={basculerCloture}>
-                <i className={cloture ? 'fas fa-unlock' : 'fas fa-lock'}></i> {cloture ? 'Rouvrir' : 'Clôturer la période'}
+                <i className={cloture ? 'fas fa-unlock' : 'fas fa-lock'}></i> {cloture ? tr('Rouvrir', 'Reopen') : tr('Clôturer la période', 'Close the period')}
               </button>
             )}
           </div>
         )}
         {resultats.length > 0 && (
           <span style={{ fontSize: 12, color: 'var(--text-muted)', paddingBottom: 8 }}>
-            {resultats[0].effectif} {labels.studentLabel.toLowerCase()}(s) classé(s)
+            {resultats[0].effectif} {labels.studentLabel.toLowerCase()}(s) {tr('classé(s)', 'ranked')}
             {resultats[0].moyenne_classe != null && (
-              <> · Moyenne de classe : <strong style={{ color: moyColor(resultats[0].moyenne_classe) }}>
+              <> · {tr('Moyenne de classe', 'Class average')} : <strong style={{ color: moyColor(resultats[0].moyenne_classe) }}>
                 {resultats[0].moyenne_classe.toFixed(2)}/20
               </strong></>
             )}
@@ -310,20 +317,19 @@ export default function Grades() {
         <div className="sms-card" style={{ padding: '10px 16px', marginBottom: 12, borderLeft: '4px solid var(--warning)', fontSize: 12 }}>
           <i className="fas fa-exclamation-triangle" style={{ color: 'var(--warning)', marginRight: 6 }}></i>
           {labels.isSuperieur
-            ? <>Crédits non renseignés (comptés pour 1) : <strong>{sansPoids.join(', ')}</strong> — à saisir dans la page Cours.</>
-            : <>Coefficient absent de la grille (compté pour 1) : <strong>{sansPoids.join(', ')}</strong> — à saisir dans
-                la page Coefficients{classe && !classe.serie && classe.niveau_scolaire ? ', et vérifier la série de la classe' : ''}.</>}
+            ? <>{tr('Crédits non renseignés (comptés pour 1)', 'Credits not set (counted as 1)')} : <strong>{sansPoids.join(', ')}</strong> — {tr('à saisir dans la page Cours.', 'to be entered on the Courses page.')}</>
+            : <>{tr('Coefficient absent de la grille (compté pour 1)', 'Coefficient missing from the grid (counted as 1)')} : <strong>{sansPoids.join(', ')}</strong> — {tr('à saisir dans la page Coefficients', 'to be entered on the Coefficients page')}{classe && !classe.serie && classe.niveau_scolaire ? tr(', et vérifier la série de la classe', ", and check the class's series") : ''}.</>}
         </div>
       )}
 
       {!classeId || !choix ? (
         <div className="sms-card" style={{ textAlign: 'center', padding: '48px 0', color: 'var(--text-muted)' }}>
           <i className="fas fa-chalkboard" style={{ fontSize: 36, display: 'block', marginBottom: 12, opacity: .2 }} />
-          Sélectionnez une classe et une période (ou l'année complète) pour afficher les moyennes
+          {tr("Sélectionnez une classe et une période (ou l'année complète) pour afficher les moyennes", 'Select a class and a period (or the full year) to display the averages')}
         </div>
       ) : loading ? <LoadingState /> : error ? <ErrorState message={error} onRetry={reload} /> : resultats.length === 0 ? (
         <div className="sms-card" style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-muted)' }}>
-          Aucune note enregistrée pour cette classe sur cette période
+          {tr('Aucune note enregistrée pour cette classe sur cette période', 'No grade recorded for this class over this period')}
         </div>
       ) : mode === 'classe' ? (
         <ReleveParClasse resultats={resultats} isPrimaire={isPrimaire} poidsLabel={poidsLabel} />
@@ -350,11 +356,11 @@ export default function Grades() {
             </div>
           </div>
 
-          <div className="sms-table-wrap" style={{ flex:1, overflowY:'auto', overflowX:'auto' }}>
+          <div className="sms-table-wrap" style={{ flex:1, overflowY:'auto', overflowX:'auto', maxHeight:'none' }}>
             <table className="sms-table">
               <thead>
                 <tr>
-                  <th>Rang</th>
+                  <th>{tr('Rang', 'Rank')}</th>
                   <th>{t.fields.matricule}</th>
                   <th>{labels.studentLabel}</th>
                   <th>{t.common.nbEval}</th>
@@ -395,7 +401,7 @@ export default function Grades() {
                           className="sms-btn sms-btn-outline sms-btn-sm"
                           onClick={() => handleExportBulletin(r)}
                           disabled={exporting === r.mle_etudiant}
-                          title="Exporter le bulletin PDF"
+                          title={tr('Exporter le bulletin PDF', 'Export the PDF report card')}
                         >
                           {exporting === r.mle_etudiant
                             ? <><div className="sms-spinner" style={{ width:12, height:12 }}></div> Export…</>

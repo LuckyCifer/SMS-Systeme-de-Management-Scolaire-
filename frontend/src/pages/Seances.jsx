@@ -6,6 +6,7 @@ import api from '../services/api';
 import { CrudTable, FormField } from '../components/CrudTable';
 import SearchableSelect from '../components/SearchableSelect';
 import { useApp } from '../context/AppContext';
+import { useTr } from '../hooks/useTr';
 import { useApi, useMutation } from '../hooks/useApi';
 import { seanceService, absenceService } from '../services/endpoints';
 import { LoadingState, ErrorState } from '../components/ApiState';
@@ -23,6 +24,7 @@ const STATUT_COLORS = {
 // n'est pas modifiée ici. L'émargement (« Signé ») ne concerne que le supérieur.
 function PresencesModal({ seance, onClose, toast }) {
   const { t, lang } = useApp();
+  const tr = useTr();
   const { typeEtab, systeme } = useEtablissement();
   const labels = etabLabels(typeEtab, systeme, lang);
   const avecEmargement = labels.isSuperieur;
@@ -67,7 +69,8 @@ function PresencesModal({ seance, onClose, toast }) {
         })),
       });
       const absents = presences.filter(p => !p.present).length;
-      toast.success(`Appel enregistré : ${absents} absent(s), ${presences.filter(p => p.present && Number(p.retard) > 0).length} retard(s).`);
+      const retards = presences.filter(p => p.present && Number(p.retard) > 0).length;
+      toast.success(tr(`Appel enregistré : ${absents} absent(s), ${retards} retard(s).`, `Roll call saved: ${absents} absent, ${retards} late.`));
       if (res.data.errors?.length) toast.error(`${res.data.errors.length} élève(s) ignoré(s).`);
       onClose();
     } catch (err) { toast.error(err.response?.data?.detail || t.errors.saving); }
@@ -92,7 +95,7 @@ function PresencesModal({ seance, onClose, toast }) {
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12,
                 padding: '8px 12px', background: 'var(--bg-darkest)', borderRadius: 8 }}>
                 <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                  {seance.date_seance} · {seance.h_debut} – {seance.h_fin} · tous présents par défaut, décochez les absents
+                  {seance.date_seance} · {seance.h_debut} – {seance.h_fin} · {tr('tous présents par défaut, décochez les absents', 'everyone present by default, untick the absent students')}
                 </span>
                 <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--green)' }}>
                   {nbPresents}/{presences.length} {t.common.present.toLowerCase()}s
@@ -104,7 +107,7 @@ function PresencesModal({ seance, onClose, toast }) {
                     <tr>
                       <th>{labels.studentLabel}</th>
                       <th style={{ textAlign: 'center', width: 80 }}>{t.common.present}</th>
-                      <th style={{ textAlign: 'center', width: 110 }}>Retard (min)</th>
+                      <th style={{ textAlign: 'center', width: 110 }}>{tr('Retard (min)', 'Late (min)')}</th>
                       {avecEmargement && <th style={{ textAlign: 'center', width: 80 }}>{t.common.signed}</th>}
                     </tr>
                   </thead>
@@ -263,19 +266,21 @@ export default function Seances() {
   const [filteredSp,   setFilteredSp]   = useState([]);
 
   const [page, setPage] = useState(1);
+  const [serverSearch, setServerSearch] = useState('');
 
   // Reset page when filters change
-  useEffect(() => { setPage(1); }, [anneeActive, classeFilter, depFilter, spFilter]);
+  useEffect(() => { setPage(1); }, [anneeActive, classeFilter, depFilter, spFilter, serverSearch]);
 
   const { data, count, loading, error, reload } = useApi(
     () => seanceService.list({
-      page_size: 25, page,
+      page_size: 25 * page, page: 1,  // défilement infini : les `page` premières tranches
       ...(anneeActive  ? { code_annee:  anneeActive.code_annee } : {}),
       ...(classeFilter ? { code_classe: classeFilter } : {}),
       ...(depFilter    ? { code_dep:    depFilter    } : {}),
       ...(spFilter     ? { code_sp:     spFilter     } : {}),
+      ...(serverSearch ? { search:      serverSearch } : {}),
     }),
-    [page, anneeActive, classeFilter, depFilter, spFilter]
+    [page, anneeActive, classeFilter, depFilter, spFilter, serverSearch]
   );
   const { mutate: create } = useMutation(useCallback(d => seanceService.create(d), []));
   const { mutate: update } = useMutation(useCallback(d => seanceService.update(d.code_seance, d), []));
@@ -373,6 +378,7 @@ export default function Seances() {
         serverPage={page}
         serverPages={Math.max(1, Math.ceil((count || 0) / 25))}
         onServerPage={setPage}
+        onServerSearch={setServerSearch}
         addLabel={t.pages.seances.addLabel}
         exportCsvUrl={`/api/seances/export-csv/${[classeFilter && `code_classe=${classeFilter}`, depFilter && `code_dep=${depFilter}`, spFilter && `code_sp=${spFilter}`].filter(Boolean).join('&') ? '?' + [classeFilter && `code_classe=${classeFilter}`, depFilter && `code_dep=${depFilter}`, spFilter && `code_sp=${spFilter}`].filter(Boolean).join('&') : ''}`}
         filters={

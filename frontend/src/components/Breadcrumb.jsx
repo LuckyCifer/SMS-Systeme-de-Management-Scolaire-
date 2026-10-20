@@ -35,6 +35,8 @@ export default function Breadcrumb() {
     '/parametrage': { label: t.nav.parametrage, icon: 'fas fa-cogs' },
     '/parametres':  { label: t.nav.parametres,  icon: 'fas fa-school' },
     '/bareme':      { label: t.nav.bareme,       icon: 'fas fa-coins' },
+    '/vie-scolaire': { label: t.nav.vieScolaire, icon: 'fas fa-user-check' },
+    '/coefficients': { label: t.nav.coefficients, icon: 'fas fa-balance-scale' },
   };
 
   const current = ROUTE_MAP[location.pathname];

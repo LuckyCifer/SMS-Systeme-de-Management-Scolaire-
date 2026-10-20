@@ -131,6 +131,7 @@ def evenements_du_jour(etablissement_id, date):
             'eleve': f'{l.mle_etudiant.nom} {l.mle_etudiant.prenom or ""}'.strip(),
             'code_classe': l.appel.code_classe_id, 'lib_classe': l.appel.code_classe.lib_classe,
             'quand': l.appel.get_creneau_display(),
+            'creneau': l.appel.creneau,  # MATIN / APRES_MIDI, traduit par l'interface
             'justifiee': l.justifiee, 'motif': l.motif or '',
         })
     lignes.sort(key=lambda x: (x['lib_classe'], x['eleve']))

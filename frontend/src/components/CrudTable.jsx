@@ -4,14 +4,39 @@
  * - Sélection multiple + bulk delete
  * - Export CSV/Excel
  * - Filtres avancés
- * - Pagination
+ * - Défilement infini dans un cadre de hauteur fixe (plus de boutons de page) :
+ *   mode client → les lignes s'affichent par tranches au fil du défilement ;
+ *   mode serveur → onServerPage(n) demande les n premières tranches (la page parente
+ *   charge page_size = taille × n, page 1), si bien qu'un rechargement après
+ *   ajout / modification / suppression renvoie toujours des lignes à jour.
  * - Colonnes masquables (P3)
  * - Skeleton loading (P4)
  */
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import SearchableSelect from './SearchableSelect';
 import EmptyState from './EmptyState';
+
+// Recherche insensible à la casse et aux accents (« eleve » trouve « Élève »).
+const sansAccents = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+// Texte visible d'une cellule rendue en JSX : chaînes et nombres des enfants, plus les
+// props textuelles usuelles (label, title) des composants. Sert à la recherche.
+function texteAffiche(noeud) {
+  if (noeud === null || noeud === undefined || typeof noeud === 'boolean') return '';
+  if (typeof noeud === 'string' || typeof noeud === 'number') return String(noeud);
+  if (Array.isArray(noeud)) return noeud.map(texteAffiche).join(' ');
+  if (typeof noeud === 'object' && noeud.props) {
+    const { children, label, title } = noeud.props;
+    return [texteAffiche(children),
+            typeof label === 'string' ? label : '',
+            typeof title === 'string' ? title : ''].filter(Boolean).join(' ');
+  }
+  return '';
+}
+
+// Mode client : lignes ajoutées à chaque fois qu'on atteint le bas du tableau.
+const TRANCHE_CLIENT = 50;
 
 /* ── Skeleton row ─────────────────────────────────────────────────── */
 function SkeletonRows({ colCount, rowCount = 8 }) {
@@ -48,17 +73,21 @@ export function CrudTable({
   serverPages   = 1,
   onServerPage  = null,
   onServerSearch = null,
+  rowKey        = null,   // champ identifiant imposé (sinon : premier champ unique trouvé)
 }) {
   const { t, toast } = useApp();
   const [search,     setSearch]     = useState('');
-  const [page,       setPage]       = useState(1);
   const [showModal,  setShowModal]  = useState(false);
   const [editItem,   setEditItem]   = useState(null);
   const [delItem,    setDelItem]    = useState(null);
   const [deleting,   setDeleting]   = useState(false);
   const [selected,   setSelected]   = useState(new Set());
   const [showBulkConfirm, setShowBulkConfirm] = useState(false);
-  const [perPage,    setPerPage]    = useState(0);
+  // Mode client : nombre de lignes affichées, augmenté au fil du défilement.
+  const [visibleCount, setVisibleCount] = useState(TRANCHE_CLIENT);
+  const wrapRef        = useRef(null);
+  const attenteRef     = useRef(false); // tranche serveur demandée, pas encore reçue
+  const prevPageRef    = useRef(serverPage);
   // P3 — colonnes masquables
   const [hiddenCols,   setHiddenCols]   = useState(new Set());
   const [showColMenu,  setShowColMenu]  = useState(false);
@@ -88,16 +117,16 @@ export function CrudTable({
 
   const visibleCols = columns.filter(col => !hiddenCols.has(col.key ?? col.accessor));
 
-  const PER_PAGE = perPage;
-  const needle   = search.toLowerCase();
+  const needle   = sansAccents(search.trim());
 
   const colVal = (col, row) => {
     if (col.searchValue) return col.searchValue(row);
     if (col.accessor)    return row[col.accessor];
     if (col.render) {
       try {
-        const v = col.render(row);
-        if (v !== null && v !== undefined && typeof v !== 'object') return v;
+        // Le texte affiché, même quand la cellule est du JSX (badge, lien, montant…).
+        const v = texteAffiche(col.render(row));
+        if (v) return v;
       } catch {}
     }
     return null;
@@ -109,7 +138,7 @@ export function CrudTable({
     : !search.trim() ? data : data.filter(row =>
         columns.some(col => {
           const val = colVal(col, row);
-          return val !== null && String(val ?? '').toLowerCase().includes(needle);
+          return val !== null && sansAccents(String(val ?? '')).includes(needle);
         })
       );
 
@@ -129,25 +158,75 @@ export function CrudTable({
         String(sortKey(a) ?? '').localeCompare(String(sortKey(b) ?? ''), 'fr', { sensitivity: 'base' })
       );
 
-  const clientPages    = perPage === 0 ? 1 : Math.max(1, Math.ceil(sorted.length / PER_PAGE));
-  const clientSafePage = Math.min(page, clientPages);
-  // In serverSide mode: data IS the current page — show it all
-  const paginated = serverSide
-    ? sorted
-    : perPage === 0 ? sorted : sorted.slice((clientSafePage - 1) * PER_PAGE, clientSafePage * PER_PAGE);
+  // Lignes affichées : tout ce que le serveur a envoyé, ou les premières lignes en mode client.
+  const paginated = serverSide ? sorted : sorted.slice(0, visibleCount);
+  const resteAAfficher = serverSide ? serverPage < serverPages : visibleCount < sorted.length;
 
-  // Effective display values (server overrides client when serverSide=true)
-  const displayPages = serverSide ? serverPages   : clientPages;
-  const displayPage  = serverSide ? serverPage    : clientSafePage;
-  const goToPage     = (p) => { if (serverSide) onServerPage?.(p); else setPage(p); };
+  // Nouvelle recherche côté client : on repart du haut.
+  useEffect(() => {
+    if (serverSide) return;
+    setVisibleCount(TRANCHE_CLIENT);
+    if (wrapRef.current) wrapRef.current.scrollTop = 0;
+  }, [search, serverSide]);
+
+  // Mode serveur : retour à la première tranche (filtre, recherche) → on repart du haut.
+  useEffect(() => {
+    if (serverSide && serverPage === 1 && prevPageRef.current > 1 && wrapRef.current) wrapRef.current.scrollTop = 0;
+    prevPageRef.current = serverPage;
+  }, [serverSide, serverPage]);
+
+  const chargerSuite = useCallback(() => {
+    if (loading || !resteAAfficher) return;
+    if (serverSide) {
+      if (attenteRef.current) return;
+      attenteRef.current = true;
+      onServerPage?.(serverPage + 1);
+    } else {
+      setVisibleCount(n => n + TRANCHE_CLIENT);
+    }
+  }, [loading, resteAAfficher, serverSide, serverPage, onServerPage]);
+
+  // Une nouvelle tranche est arrivée : on autorise la demande suivante.
+  useEffect(() => { attenteRef.current = false; }, [data]);
+
+  const surDefilement = e => {
+    const el = e.currentTarget;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 120) chargerSuite();
+  };
+
+  // Si les lignes affichées ne remplissent pas le cadre, il n'y a pas de barre de
+  // défilement : on charge la suite tout de suite.
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (el && !loading && resteAAfficher && el.scrollHeight <= el.clientHeight + 4) chargerSuite();
+  }, [paginated.length, loading, resteAAfficher, chargerSuite]);
 
   const openAdd  = () => { setEditItem(null); setShowModal(true); };
   const openEdit = (item) => { setEditItem(item); setShowModal(true); };
   const close    = () => { setShowModal(false); setEditItem(null); };
 
-  const getPk = (row) => row.id ?? row.mle_etudiant ?? row.mle_ens ??
-    row.code_classe ?? row.login ?? row.code_inscription ??
-    row.code_paiement ?? row.code_eval ?? JSON.stringify(row);
+  // Identifiant de ligne : le premier champ candidat présent sur toutes les lignes ET unique
+  // parmi elles. Un champ partagé (code_classe des fiches d'une même classe, mle_etudiant des
+  // paiements d'un même élève) donnerait des clés React en double : des lignes périmées
+  // restent alors affichées après une recherche, et la sélection multiple se trompe.
+  const champPk = useMemo(() => {
+    const lignes = data || [];
+    if (!lignes.length) return null;
+    const presents = Object.keys(lignes[0]);
+    const candidats = [rowKey, 'id', 'mle_etudiant', 'mle_ens', 'login',
+                       ...presents.filter(k => /^code_/.test(k) && k !== 'code_classe'), 'code_classe']
+      .filter(Boolean);
+    return candidats.find(k => {
+      const vus = new Set();
+      return lignes.every(r => {
+        const v = r[k];
+        if (v === null || v === undefined || typeof v === 'object' || vus.has(v)) return false;
+        vus.add(v);
+        return true;
+      });
+    }) || null;
+  }, [data, rowKey]);
+  const getPk = (row) => (champPk ? row[champPk] : JSON.stringify(row));
 
   const toggleSelect = (row) => {
     const pk = getPk(row);
@@ -159,11 +238,11 @@ export function CrudTable({
   };
 
   const toggleAll = () => {
-    if (selected.size === paginated.length) setSelected(new Set());
-    else setSelected(new Set(paginated.map(getPk)));
+    if (selected.size === sorted.length) setSelected(new Set());
+    else setSelected(new Set(sorted.map(getPk)));
   };
 
-  const allSelected = paginated.length > 0 && selected.size === paginated.length;
+  const allSelected = sorted.length > 0 && selected.size === sorted.length;
 
   const handleBulkDelete = async () => {
     if (!onBulkDelete) return;
@@ -277,7 +356,7 @@ export function CrudTable({
                 onChange={e => {
                   const val = e.target.value;
                   setSearch(val);
-                  if (!serverSide) { setPage(1); return; }
+                  if (!serverSide) return;
                   if (onServerSearch) {
                     clearTimeout(searchTimerRef.current);
                     searchTimerRef.current = setTimeout(() => {
@@ -362,7 +441,8 @@ export function CrudTable({
         </div>
 
         {/* Table */}
-        <div className="sms-table-wrap" style={{ flex: 1, overflowY: 'auto', overflowX: 'auto' }}>
+        <div className="sms-table-wrap" ref={wrapRef} onScroll={surDefilement}
+          style={{ flex: 1, overflowY: 'auto', overflowX: 'auto', maxHeight: 'none' }}>
           <table className="sms-table">
             <thead>
               <tr>
@@ -436,6 +516,14 @@ export function CrudTable({
                   </tr>
                 );
               })}
+              {!loading && resteAAfficher && paginated.length > 0 && (
+                <tr>
+                  <td colSpan={colCount} style={{ textAlign: 'center', padding: 12, color: 'var(--text-muted)', fontSize: 12 }}>
+                    <div className="sms-spinner" style={{ width: 12, height: 12, display: 'inline-block', marginRight: 8, verticalAlign: 'middle' }}></div>
+                    {t.common.loadingMore}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -452,52 +540,16 @@ export function CrudTable({
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
               {serverSide
-                ? `${data.length} ${t.common.of} ${totalCount ?? '?'} ${t.common.elements}`
-                : perPage === 0
-                  ? `${sorted.length} ${sorted.length !== 1 ? t.common.elements : t.common.element}`
-                  : `${Math.min((clientSafePage-1)*PER_PAGE+1, sorted.length)}–${Math.min(clientSafePage*PER_PAGE, sorted.length)} ${t.common.of} ${sorted.length}`
+                ? `${data.length} ${t.common.of} ${totalCount ?? data.length} ${t.common.elements}`
+                : `${paginated.length} ${t.common.of} ${sorted.length} ${sorted.length !== 1 ? t.common.elements : t.common.element}`
               }
             </span>
-            {/* Boutons perPage masqués en mode serveur (le serveur contrôle la taille) */}
-            {!serverSide && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t.common.perPage}</span>
-                {[10, 25, 50, 0].map(n => (
-                  <button
-                    key={n}
-                    onClick={() => { setPerPage(n); setPage(1); }}
-                    style={{
-                      padding: '2px 7px', fontSize: 11, borderRadius: 4, cursor: 'pointer', border: '1px solid',
-                      borderColor: perPage === n ? 'var(--accent)' : 'var(--border)',
-                      background:  perPage === n ? 'var(--accent-glow)' : 'transparent',
-                      color:       perPage === n ? 'var(--accent)' : 'var(--text-muted)',
-                      fontWeight:  perPage === n ? 700 : 400,
-                      transition:  'all .15s',
-                    }}
-                  >{n === 0 ? t.common.all : n}</button>
-                ))}
-              </div>
-            )}
           </div>
-
-          {displayPages > 1 && (
-            <div className="sms-pagination">
-              <button className="sms-page-btn" onClick={() => goToPage(1)} disabled={displayPage===1} title={t.common.first}>
-                <i className="fas fa-angle-double-left" style={{ fontSize: 10 }}></i>
-              </button>
-              <button className="sms-page-btn" onClick={() => goToPage(Math.max(1, displayPage-1))} disabled={displayPage===1}>
-                <i className="fas fa-chevron-left" style={{ fontSize: 10 }}></i>
-              </button>
-              <span style={{ fontSize: 12, color: 'var(--text-secondary)', padding: '0 10px', fontWeight: 600, minWidth: 72, textAlign: 'center', lineHeight: '32px' }}>
-                {displayPage} / {displayPages}
-              </span>
-              <button className="sms-page-btn" onClick={() => goToPage(Math.min(displayPages, displayPage+1))} disabled={displayPage===displayPages}>
-                <i className="fas fa-chevron-right" style={{ fontSize: 10 }}></i>
-              </button>
-              <button className="sms-page-btn" onClick={() => goToPage(displayPages)} disabled={displayPage===displayPages} title={t.common.last}>
-                <i className="fas fa-angle-double-right" style={{ fontSize: 10 }}></i>
-              </button>
-            </div>
+          {resteAAfficher && !loading && (
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+              <i className="fas fa-arrow-down" style={{ marginRight: 5 }}></i>
+              {t.common.scrollForMore}
+            </span>
           )}
         </div>
       </div>

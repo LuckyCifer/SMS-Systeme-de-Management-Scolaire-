@@ -91,7 +91,7 @@ export default function CarteEtudiants() {
 
   const { data, count, loading, error, reload } = useApi(
     () => carteEtudiantService.list({
-      page_size: PAGE_SIZE, page,
+      page_size: PAGE_SIZE * page, page: 1,  // défilement infini : les `page` premières tranches
       ...(serverSearch ? { search: serverSearch } : {}),
     }),
     [page, serverSearch]

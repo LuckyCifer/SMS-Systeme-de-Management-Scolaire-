@@ -268,6 +268,12 @@ class DeductionNiveauSerieTest(TestCase):
             'Terminale C':    ('TLE_FR', 'C'),
             'Tle TI':         ('TLE_FR', 'TI'),
             '2nde D':         ('2NDE_FR', 'D'),
+            # Littéraires avec la langue (AE = A Espagnol…) et classes numérotées.
+            '2nde AE':        ('2NDE_FR', 'A'),
+            '1ère AL':        ('1ERE_FR', 'A'),
+            'Tle AC2':        ('TLE_FR', 'A'),
+            '2nde C2':        ('2NDE_FR', 'C'),
+            'Tle D1':         ('TLE_FR', 'D'),
             '6ème A':         ('6EME_FR', ''),   # 6ème / 5ème : lettre = groupe
             '5ème B':         ('5EME_FR', ''),
             '4ème Espagnol':  ('4EME_FR', 'ESPAGNOL'),

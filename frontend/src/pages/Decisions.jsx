@@ -6,6 +6,7 @@ import api from '../services/api';
 import { CrudTable, FormField } from '../components/CrudTable';
 import SearchableSelect from '../components/SearchableSelect';
 import { useApp } from '../context/AppContext';
+import { useTr } from '../hooks/useTr';
 import { useApi, useMutation } from '../hooks/useApi';
 import { decisionService } from '../services/endpoints';
 import { LoadingState, ErrorState } from '../components/ApiState';
@@ -28,6 +29,7 @@ const RESULTAT_COLORS = {
 // règles LMD au supérieur (validation des matières, compensation, note éliminatoire).
 function GenererModal({ classes, annees, labels, onClose, onDone }) {
   const { t, toast } = useApp();
+  const tr = useTr();
   const [f, setF] = useState({
     code_classe: '', code_annee: annees[0]?.code_annee || '', session: 'NORMALE', seuil: 10,
   });
@@ -39,8 +41,8 @@ function GenererModal({ classes, annees, labels, onClose, onDone }) {
     setRunning(true);
     try {
       const { data } = await decisionService.generer({ ...f, seuil: Number(f.seuil) });
-      toast.success(`${data.crees} décision(s) créée(s), ${data.mis_a_jour} mise(s) à jour`
-        + (data.sans_notes ? ` — ${data.sans_notes} élève(s) sans note ignoré(s)` : ''));
+      toast.success(tr(`${data.crees} décision(s) créée(s), ${data.mis_a_jour} mise(s) à jour`, `${data.crees} decision(s) created, ${data.mis_a_jour} updated`)
+        + (data.sans_notes ? tr(` — ${data.sans_notes} élève(s) sans note ignoré(s)`, ` — ${data.sans_notes} student(s) without grades skipped`) : ''));
       onDone();
     } catch (err) {
       toast.error(err.response?.data?.error || err.response?.data?.detail || t.errors.saving);
@@ -55,7 +57,7 @@ function GenererModal({ classes, annees, labels, onClose, onDone }) {
         <div className="sms-modal-header">
           <div className="sms-modal-title">
             <i className="fas fa-magic" style={{ marginRight: 8, color: 'var(--green)' }}></i>
-            Générer les décisions
+            {tr('Générer les décisions', 'Generate decisions')}
           </div>
           <button className="sms-btn-icon" onClick={onClose}><i className="fas fa-times"></i></button>
         </div>
@@ -63,10 +65,12 @@ function GenererModal({ classes, annees, labels, onClose, onDone }) {
           <div className="sms-modal-body">
             <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 0 }}>
               {labels.isSuperieur
-                ? "Matière validée si sa moyenne ≥ 10. Si la moyenne générale atteint le seuil et qu'aucune matière n'est sous sa note éliminatoire, toutes les matières sont validées par compensation. Admis si tous les crédits sont validés."
-                : `Admis si la moyenne annuelle (pondérée par les coefficients) atteint le seuil, sinon redouble.`}
-              {' '}Les décisions existantes de cette session sont mises à jour (le président du jury
-              et les observations déjà saisis sont conservés). Vous pourrez ajuster chaque décision ensuite.
+                ? tr("Matière validée si sa moyenne ≥ 10. Si la moyenne générale atteint le seuil et qu'aucune matière n'est sous sa note éliminatoire, toutes les matières sont validées par compensation. Admis si tous les crédits sont validés.",
+                     'A subject is passed if its average is ≥ 10. If the overall average reaches the threshold and no subject is below its elimination mark, all subjects are passed by compensation. Admitted if all credits are passed.')
+                : tr('Admis si la moyenne annuelle (pondérée par les coefficients) atteint le seuil, sinon redouble.',
+                     'Promoted if the annual average (weighted by the coefficients) reaches the threshold, otherwise repeats the year.')}
+              {' '}{tr('Les décisions existantes de cette session sont mises à jour (le président du jury et les observations déjà saisis sont conservés). Vous pourrez ajuster chaque décision ensuite.',
+                       'Existing decisions for this session are updated (the jury president and remarks already entered are kept). You can adjust each decision afterwards.')}
             </p>
             <div className="sms-form-row">
               <SearchableSelect
@@ -78,8 +82,8 @@ function GenererModal({ classes, annees, labels, onClose, onDone }) {
             </div>
             <div className="sms-form-row">
               <FormField label={t.fields.session} name="session" type="select" value={f.session} onChange={ch}
-                options={[{ value: 'NORMALE', label: 'Session normale' }, { value: 'RATTRAPAGE', label: 'Rattrapage' }]} />
-              <FormField label="Seuil d'admission (/20)" name="seuil" type="number" value={f.seuil} onChange={ch} required />
+                options={[{ value: 'NORMALE', label: tr('Session normale', 'Regular session') }, { value: 'RATTRAPAGE', label: tr('Rattrapage', 'Resit') }]} />
+              <FormField label={tr("Seuil d'admission (/20)", 'Pass mark (/20)')} name="seuil" type="number" value={f.seuil} onChange={ch} required />
             </div>
           </div>
           <div className="sms-modal-footer">
@@ -196,6 +200,7 @@ function Form({ item, onClose, onSave, labels }) {
 
 export default function Decisions() {
   const { t, toast, anneeActive, lang } = useApp();
+  const tr = useTr();
   const { typeEtab, systeme } = useEtablissement();
   const labels = etabLabels(typeEtab, systeme, lang);
 
@@ -335,7 +340,7 @@ export default function Decisions() {
       {peutDeliberer && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
           <button className="sms-btn sms-btn-primary" onClick={() => setShowGenerer(true)}>
-            <i className="fas fa-magic"></i> Générer les décisions
+            <i className="fas fa-magic"></i> {tr('Générer les décisions', 'Generate decisions')}
           </button>
         </div>
       )}

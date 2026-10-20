@@ -6,6 +6,7 @@ import api from '../services/api';
 import { CrudTable, FormField } from '../components/CrudTable';
 import SearchableSelect from '../components/SearchableSelect';
 import { useApp } from '../context/AppContext';
+import { useTr } from '../hooks/useTr';
 import { useApi, useMutation } from '../hooks/useApi';
 import { ficheNotesService } from '../services/endpoints';
 import { LoadingState, ErrorState } from '../components/ApiState';
@@ -29,7 +30,11 @@ const STATUT_COLORS = {
   VALIDE:    'badge-success',
   IMPORTE:   'badge-success',
 };
-const STATUT_LIBELLES = { BROUILLON: 'Brouillon', SOUMIS: 'Soumise au censeur', VALIDE: 'Validée', IMPORTE: 'Validée' };
+const STATUT_LIBELLES = {
+  BROUILLON: ['Brouillon', 'Draft'], SOUMIS: ['Soumise au censeur', 'Submitted for review'],
+  VALIDE: ['Validée', 'Approved'], IMPORTE: ['Validée', 'Approved'],
+};
+const libStatut = (statut, tr) => (STATUT_LIBELLES[statut] ? tr(...STATUT_LIBELLES[statut]) : statut);
 
 // ── Modale saisie des notes ──────────────────────────────────────────────────
 // Notes saisies sur le barème de la fiche (ex : /10), converties sur 20 au report. Absent
@@ -37,6 +42,7 @@ const STATUT_LIBELLES = { BROUILLON: 'Brouillon', SOUMIS: 'Soumise au censeur', 
 // seule opération (tout ou rien) via /saisir/.
 function SaisieModal({ fiche, onClose, toast }) {
   const { t, lang } = useApp();
+  const tr = useTr();
   const { typeEtab, systeme } = useEtablissement();
   const labels = etabLabels(typeEtab, systeme, lang);
   const isPrimaire = typeEtab === 'PRIMAIRE';
@@ -108,8 +114,8 @@ function SaisieModal({ fiche, onClose, toast }) {
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8,
                 padding: '8px 12px', background: 'var(--bg-darkest)', borderRadius: 8 }}>
                 <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                  {fiche.lib_classe} · {fiche.date_evaluation} · Notes sur <strong>{bareme}</strong>
-                  {bareme !== 20 && ' (converties sur 20 à la validation)'}
+                  {fiche.lib_classe} · {fiche.date_evaluation} · {tr('Notes sur', 'Grades out of')} <strong>{bareme}</strong>
+                  {bareme !== 20 && tr(' (converties sur 20 à la validation)', ' (converted to /20 on approval)')}
                 </span>
                 <span style={{ fontSize: 12, fontWeight: 700, display: 'flex', gap: 10, color: 'var(--green)' }}>
                   <span>{t.common.classAvg} : <strong>{moy}</strong>/20</span>
@@ -120,8 +126,8 @@ function SaisieModal({ fiche, onClose, toast }) {
               </div>
               {!modifiable && (
                 <div style={{ marginBottom: 10, fontSize: 12, color: 'var(--warning)' }}>
-                  <i className="fas fa-lock"></i> Fiche {STATUT_LIBELLES[fiche.statut]?.toLowerCase()} : consultation seule.
-                  {fiche.statut !== 'BROUILLON' && ' Le censeur peut la rouvrir pour correction.'}
+                  <i className="fas fa-lock"></i> {tr('Fiche', 'Sheet')} {libStatut(fiche.statut, tr).toLowerCase()} : {tr('consultation seule.', 'read only.')}
+                  {fiche.statut !== 'BROUILLON' && tr(' Le censeur peut la rouvrir pour correction.', ' The vice-principal can reopen it for correction.')}
                 </div>
               )}
               <div className="sms-table-wrap">
@@ -129,11 +135,11 @@ function SaisieModal({ fiche, onClose, toast }) {
                   <thead>
                     <tr>
                       <th>{labels.studentLabel}</th>
-                      <th style={{ textAlign: 'center', width: 90 }}>Note /{bareme}</th>
+                      <th style={{ textAlign: 'center', width: 90 }}>{tr('Note', 'Grade')} /{bareme}</th>
                       {bareme !== 20 && <th style={{ textAlign: 'center', width: 70 }}>/20</th>}
                       {isPrimaire && <th style={{ textAlign: 'center', width: 80 }}>{t.fields.appreciation}</th>}
-                      <th style={{ textAlign: 'center', width: 70 }}>Absent</th>
-                      <th style={{ textAlign: 'center', width: 80 }}>Justifiée</th>
+                      <th style={{ textAlign: 'center', width: 70 }}>{tr('Absent', 'Absent')}</th>
+                      <th style={{ textAlign: 'center', width: 80 }}>{tr('Justifiée', 'Excused')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -164,7 +170,7 @@ function SaisieModal({ fiche, onClose, toast }) {
                           </td>
                           <td style={{ textAlign: 'center' }}>
                             <input type="checkbox" checked={d.justifie} disabled={!d.absent || !modifiable}
-                              title="Absence justifiée : neutralisée dans la moyenne (sinon 0)"
+                              title={tr('Absence justifiée : neutralisée dans la moyenne (sinon 0)', 'Excused absence: not counted in the average (otherwise 0)')}
                               onChange={e => maj(d.mle, { justifie: e.target.checked })}
                               style={{ accentColor: 'var(--green)', width: 16, height: 16, cursor: 'pointer' }} />
                           </td>
@@ -175,7 +181,8 @@ function SaisieModal({ fiche, onClose, toast }) {
                 </table>
               </div>
               <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '8px 0 0' }}>
-                Absent non justifié : 0. Absent justifié : l'évaluation est neutralisée dans la moyenne de l'élève.
+                {tr("Absent non justifié : 0. Absent justifié : l'évaluation est neutralisée dans la moyenne de l'élève.",
+                    "Unexcused absence: 0. Excused absence: the assessment is not counted in the student's average.")}
               </p>
             </>
           )}
@@ -184,7 +191,7 @@ function SaisieModal({ fiche, onClose, toast }) {
           <button className="sms-btn sms-btn-outline sms-btn-sm" onClick={onClose}>{t.common.close}</button>
           {modifiable && (
             <button className="sms-btn sms-btn-primary sms-btn-sm" onClick={handleSave} disabled={saving || loading || horsBareme}
-              title={horsBareme ? `Une note dépasse le barème (${bareme})` : undefined}>
+              title={horsBareme ? tr(`Une note dépasse le barème (${bareme})`, `A grade exceeds the maximum (${bareme})`) : undefined}>
               {saving ? <><div className="sms-spinner" style={{ width: 14, height: 14 }}></div> {t.common.loading}</>
                 : <><i className="fas fa-save"></i> {t.common.saveNotes}</>}
             </button>
@@ -198,6 +205,7 @@ function SaisieModal({ fiche, onClose, toast }) {
 // ── Formulaire fiche ─────────────────────────────────────────────────────────
 function Form({ item, onClose, onSave }) {
   const { t } = useApp();
+  const tr = useTr();
   const [matieres,    setMatieres]    = useState([]);
   const [classes,     setClasses]     = useState([]);
   const [enseignants, setEns]         = useState([]);
@@ -321,7 +329,7 @@ function Form({ item, onClose, onSave }) {
         />
         <FormField label={t.fields.annee} name="code_annee" value={
             periodes.find(p => String(p.code_periode) === String(f.code_periode))?.code_annee || f.code_annee || '—'}
-          onChange={() => {}} disabled help="Déduite automatiquement de la période" />
+          onChange={() => {}} disabled help={tr('Déduite automatiquement de la période', 'Derived automatically from the period')} />
       </div>
       <div className="sms-form-row">
         <FormField label={t.fields.dateCours} name="date_evaluation" type="date" value={f.date_evaluation} onChange={ch} required help="Format : JJ/MM/AAAA" />
@@ -341,6 +349,7 @@ const PAGE_SIZE = 25;
 
 export default function FicheNotes() {
   const { t, toast } = useApp();
+  const tr = useTr();
   const [saisieModal, setSaisieModal] = useState(null);
   const [enCours,     setEnCours]     = useState(null);
   const gestion = estGestionnaire();
@@ -349,7 +358,7 @@ export default function FicheNotes() {
 
   const { data, count, loading, error, reload } = useApi(
     () => ficheNotesService.list({
-      page_size: PAGE_SIZE, page,
+      page_size: PAGE_SIZE * page, page: 1,  // défilement infini : les `page` premières tranches
       ...(serverSearch ? { search: serverSearch } : {}),
     }),
     [page, serverSearch]
@@ -376,8 +385,8 @@ export default function FicheNotes() {
     { key: 'type',    label: t.fields.typeEval,   render: r => r.lib_type_eval || '—' },
     { accessor: 'date_evaluation', label: t.fields.date },
     { accessor: 'bareme', label: t.fields.bareme },
-    { key: 'statut',  label: t.fields.statut, searchValue: r => STATUT_LIBELLES[r.statut] || '', render: r => (
-      <span className={`sms-badge ${STATUT_COLORS[r.statut] || 'badge-secondary'}`}>{STATUT_LIBELLES[r.statut] || r.statut}</span>
+    { key: 'statut',  label: t.fields.statut, searchValue: r => libStatut(r.statut, tr), render: r => (
+      <span className={`sms-badge ${STATUT_COLORS[r.statut] || 'badge-secondary'}`}>{libStatut(r.statut, tr)}</span>
     )},
     { key: 'actions', label: '', render: r => {
       const bouton = (action, libelle, icone, style, message) => (
@@ -393,19 +402,19 @@ export default function FicheNotes() {
         <div className="flex gap-2">
           <button className="sms-btn sms-btn-outline sms-btn-sm"
             onClick={e => { e.stopPropagation(); setSaisieModal(r); }}>
-            <i className={ficheModifiable(r) ? 'fas fa-edit' : 'fas fa-eye'}></i> {ficheModifiable(r) ? 'Saisir' : 'Voir'}
+            <i className={ficheModifiable(r) ? 'fas fa-edit' : 'fas fa-eye'}></i> {ficheModifiable(r) ? tr('Saisir', 'Enter') : tr('Voir', 'View')}
           </button>
-          {r.statut === 'BROUILLON' && !gestion && bouton('soumettre', 'Soumettre', 'fas fa-paper-plane',
-            { background: 'var(--warning)', color: '#fff', border: 'none' }, () => 'Fiche soumise au censeur.')}
-          {gestion && ['BROUILLON', 'SOUMIS'].includes(r.statut) && bouton('valider', 'Valider', 'fas fa-check',
-            { background: 'var(--green)', color: '#fff', border: 'none' }, d => `Fiche validée : ${d.imported} note(s) reportée(s).`)}
-          {gestion && ['SOUMIS', 'VALIDE', 'IMPORTE'].includes(r.statut) && bouton('rouvrir', 'Rouvrir', 'fas fa-unlock',
-            { background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border)' }, () => 'Fiche rouverte pour correction.')}
+          {r.statut === 'BROUILLON' && !gestion && bouton('soumettre', tr('Soumettre', 'Submit'), 'fas fa-paper-plane',
+            { background: 'var(--warning)', color: '#fff', border: 'none' }, () => tr('Fiche soumise au censeur.', 'Sheet submitted for review.'))}
+          {gestion && ['BROUILLON', 'SOUMIS'].includes(r.statut) && bouton('valider', tr('Valider', 'Approve'), 'fas fa-check',
+            { background: 'var(--green)', color: '#fff', border: 'none' }, d => tr(`Fiche validée : ${d.imported} note(s) reportée(s).`, `Sheet approved: ${d.imported} grade(s) recorded.`))}
+          {gestion && ['SOUMIS', 'VALIDE', 'IMPORTE'].includes(r.statut) && bouton('rouvrir', tr('Rouvrir', 'Reopen'), 'fas fa-unlock',
+            { background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border)' }, () => tr('Fiche rouverte pour correction.', 'Sheet reopened for correction.'))}
         </div>
       );
     }},
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [t, enCours, gestion]);
+  ], [t, tr, enCours, gestion]);
 
   if (error) return <ErrorState message={error} onRetry={reload} />;
 

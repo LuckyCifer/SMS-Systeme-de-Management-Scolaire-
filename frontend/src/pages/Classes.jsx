@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import api from '../services/api';
 import { CrudTable, FormField } from '../components/CrudTable';
 import { useApp } from '../context/AppContext';
+import { useTr } from '../hooks/useTr';
 import { useApi, useMutation } from '../hooks/useApi';
 import { classeService, niveauScolaireService } from '../services/endpoints';
 import { LoadingState, ErrorState } from '../components/ApiState';
@@ -11,6 +12,7 @@ import { SERIES_PAR_NIVEAU, LIB_SERIE } from '../utils/notes';
 
 function Form({ item, onClose, onSave, niveauxOptions, labels, departements, specialites }) {
   const { t } = useApp();
+  const tr = useTr();
 
   const fkStr = (v, key) => (typeof v === 'object' ? v?.[key] : v) || '';
 
@@ -110,9 +112,9 @@ function Form({ item, onClose, onSave, niveauxOptions, labels, departements, spe
           coefficients de la classe (page Coefficients). « 6ème A » n'a pas de série. */}
       {SERIES_PAR_NIVEAU[f.niveau_scolaire] && (
         <FormField
-          label="Série" name="serie" type="select" value={f.serie} onChange={ch} required
+          label={tr('Série', 'Series')} name="serie" type="select" value={f.serie} onChange={ch} required
           options={SERIES_PAR_NIVEAU[f.niveau_scolaire].map(s => ({ value: s, label: LIB_SERIE[s] }))}
-          help="Détermine les coefficients appliqués à cette classe (page Coefficients)."
+          help={tr('Détermine les coefficients appliqués à cette classe (page Coefficients).', 'Determines the coefficients applied to this class (Coefficients page).')}
         />
       )}
 
@@ -131,6 +133,7 @@ function Form({ item, onClose, onSave, niveauxOptions, labels, departements, spe
 
 export default function Classes() {
   const { t, toast, lang } = useApp();
+  const tr = useTr();
   const { typeEtab, systeme } = useEtablissement();
   const labels = etabLabels(typeEtab, systeme, lang);
 
@@ -204,10 +207,10 @@ export default function Classes() {
     { accessor:'lib_dep',          label: labels.departementLabel },
     { accessor:'lib_niv_scolaire', label: t.pages.parametres?.niveauScolaire || labels.niveauLabel },
     ...(labels.isSecondaire ? [{
-      key: 'serie', label: 'Série', searchValue: r => r.serie || '', render: r => r.serie
+      key: 'serie', label: tr('Série', 'Series'), searchValue: r => r.serie || '', render: r => r.serie
         ? <span className="sms-badge badge-info">{LIB_SERIE[r.serie] || r.serie}</span>
         : (SERIES_PAR_NIVEAU[r.niveau_scolaire]
-            ? <span className="sms-badge badge-warning" title="Série à renseigner pour appliquer les coefficients">à renseigner</span>
+            ? <span className="sms-badge badge-warning" title={tr('Série à renseigner pour appliquer les coefficients', 'Series to be set to apply the coefficients')}>{tr('à renseigner', 'to be set')}</span>
             : <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>—</span>),
     }] : []),
     { accessor:'lib_bat',        label: t.fields.batiment },
@@ -240,7 +243,7 @@ export default function Classes() {
           {labels.showDepartements && (
             <select className="sms-input" style={{ height: 34, minWidth: 180, fontSize: 12 }}
               value={spFilter} onChange={e => setSpFilter(e.target.value)} disabled={!depFilter}>
-              <option value="">{labels.isSuperieur ? t.common.allSp : 'Toutes les options'}</option>
+              <option value="">{labels.isSuperieur ? t.common.allSp : tr('Toutes les options', 'All options')}</option>
               {filteredSp.map(s => <option key={s.code_sp} value={s.code_sp}>{s.lib_sp}</option>)}
             </select>
           )}

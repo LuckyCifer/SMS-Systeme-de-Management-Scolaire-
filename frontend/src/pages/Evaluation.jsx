@@ -1,7 +1,10 @@
 import { useState, useCallback, useEffect } from 'react';
+
+const PAGE_SIZE = 50;
 import api from '../services/api';
 import { CrudTable, FormField } from '../components/CrudTable';
 import { useApp } from '../context/AppContext';
+import { useTr } from '../hooks/useTr';
 import { useApi, useMutation } from '../hooks/useApi';
 import { evaluationService } from '../services/endpoints';
 import { LoadingState, ErrorState } from '../components/ApiState';
@@ -21,6 +24,7 @@ const APPRECIATION_COLOR = { A: 'badge-success', ECA: 'badge-warning', NA: 'badg
 
 function Form({ item, onClose, onSave }) {
   const { t, lang } = useApp();
+  const tr = useTr();
   const { typeEtab, systeme } = useEtablissement();
   const labels = etabLabels(typeEtab, systeme, lang);
   const [f, setF] = useState({
@@ -54,7 +58,8 @@ function Form({ item, onClose, onSave }) {
       </div>
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 6 }}>
         <input type="checkbox" checked={f.dispense} onChange={e => setF({ ...f, dispense: e.target.checked })} />
-        Absent justifié — évaluation neutralisée dans la moyenne (sinon, un absent non justifié reçoit 0)
+        {tr('Absent justifié — évaluation neutralisée dans la moyenne (sinon, un absent non justifié reçoit 0)',
+            'Excused absence — assessment not counted in the average (otherwise an unexcused absence gets 0)')}
       </label>
       <div className="sms-modal-footer" style={{ padding:'14px 0 0', border:'none' }}>
         <button type="button" className="sms-btn sms-btn-outline sms-btn-sm" onClick={onClose}>{t.common.cancel}</button>
@@ -66,6 +71,7 @@ function Form({ item, onClose, onSave }) {
 
 export default function Evaluation() {
   const { t, toast, lang } = useApp();
+  const tr = useTr();
   const { typeEtab, systeme } = useEtablissement();
   const labels = etabLabels(typeEtab, systeme, lang);
 
@@ -101,13 +107,18 @@ export default function Evaluation() {
     }
   }, [depFilter, specialites]);
 
-  const { data, loading, error, reload } = useApi(
+  // Recherche et défilement infini côté serveur : toutes les notes, pas seulement les premières.
+  const [page,         setPage]         = useState(1);
+  const [serverSearch, setServerSearch] = useState('');
+  useEffect(() => { setPage(1); }, [depFilter, spFilter, serverSearch]);
+  const { data, count, loading, error, reload } = useApi(
     () => evaluationService.list({
-      page_size: 500,
-      ...(depFilter ? { code_dep: depFilter } : {}),
-      ...(spFilter  ? { code_sp:  spFilter  } : {}),
+      page_size: PAGE_SIZE * page, page: 1,
+      ...(depFilter    ? { code_dep: depFilter }    : {}),
+      ...(spFilter     ? { code_sp:  spFilter  }    : {}),
+      ...(serverSearch ? { search:   serverSearch } : {}),
     }),
-    [depFilter, spFilter]
+    [depFilter, spFilter, page, serverSearch]
   );
   const { mutate: create } = useMutation(useCallback((d) => evaluationService.create(d), []));
   const { mutate: update } = useMutation(useCallback((d) => evaluationService.update(d.code_eval, d), []));
@@ -123,7 +134,7 @@ export default function Evaluation() {
     { key:'date',  label: t.fields.date,     render: r => r.date_eval?.slice(0,10) || '—' },
     // Primaire : la note /20 est accompagnée de son appréciation A/ECA/NA.
     { key:'note',  label: t.fields.note, searchValue: r => `${r.note ?? ''} ${r.appreciation ?? ''}`, render: r => <>
-        {r.dispense && <span className="sms-badge badge-secondary" title="Absence justifiée : neutralisée">ABS. J</span>}
+        {r.dispense && <span className="sms-badge badge-secondary" title={tr('Absence justifiée : neutralisée', 'Excused absence: not counted')}>{tr('ABS. J', 'EXC.')}</span>}
         {r.note !== null && r.note !== undefined && <span className={`sms-badge ${noteColor(r.note)}`}>{r.note}/20</span>}
         {r.appreciation && <> <span className={`sms-badge ${APPRECIATION_COLOR[r.appreciation] || 'badge-secondary'}`}>{r.appreciation}</span></>}
       </>
@@ -138,6 +149,9 @@ export default function Evaluation() {
       title={t.pages.evaluations.title} subtitle={t.pages.evaluations.subtitle}
       sortBy={r => r.nom_etudiant || r.mle_etudiant || ''}
       icon="fas fa-clipboard-check" columns={COLS} data={data || []} addLabel={t.common.add}
+      totalCount={count} serverSide serverPage={page}
+      serverPages={Math.max(1, Math.ceil((count || 0) / PAGE_SIZE))}
+      onServerPage={setPage} onServerSearch={setServerSearch}
       exportCsvUrl={`/api/evaluations/export-csv/${[depFilter && `code_dep=${depFilter}`, spFilter && `code_sp=${spFilter}`].filter(Boolean).join('&') ? '?' + [depFilter && `code_dep=${depFilter}`, spFilter && `code_sp=${spFilter}`].filter(Boolean).join('&') : ''}`}
       filters={
         <div className="flex gap-2 items-center" style={{ flexWrap: 'wrap' }}>

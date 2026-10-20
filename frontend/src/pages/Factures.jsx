@@ -208,7 +208,8 @@ export default function Factures() {
   const [statsVersion,  setStatsVersion]  = useState(0);
   const reloadStats = useCallback(() => setStatsVersion(v => v + 1), []);
 
-  useEffect(() => { setPage(1); }, [anneeActive?.code_annee]);
+  const [serverSearch, setServerSearch] = useState('');
+  useEffect(() => { setPage(1); }, [anneeActive?.code_annee, serverSearch]);
 
   useEffect(() => {
     let active = true;
@@ -223,11 +224,13 @@ export default function Factures() {
 
   const { data, count, loading, error, reload } = useApi(
     () => factureService.list({
-      page,
-      page_size: PAGE_SIZE,
+      // Défilement infini : les `page` premières tranches.
+      page: 1,
+      page_size: PAGE_SIZE * page,
       ...(anneeActive ? { code_annee: anneeActive.code_annee } : {}),
+      ...(serverSearch ? { search: serverSearch } : {}),
     }),
-    [anneeActive, page]
+    [anneeActive, page, serverSearch]
   );
   const { mutate: create } = useMutation(useCallback(d => factureService.create(d), []));
   const { mutate: update } = useMutation(useCallback(d => factureService.update(d.code_facture, d), []));
@@ -284,33 +287,17 @@ export default function Factures() {
         sortBy={r => r.nom_etudiant || r.mle_etudiant || ''}
         columns={COLS} data={data||[]} addLabel={t.pages.factures.addLabel}
         totalCount={count}
+        serverSide
+        serverPage={page}
+        serverPages={totalPages}
+        onServerPage={setPage}
+        onServerSearch={setServerSearch}
         onAdd={async d => { try { await create(d); toast.success(t.toast.saved); reload(); reloadStats(); } catch(e){ toast.error(e.message); } }}
         onEdit={async d => { try { await update(d); toast.success(t.toast.updated); reload(); reloadStats(); } catch(e){ toast.error(e.message); } }}
         onDelete={async d => { try { await remove(d); toast.success(t.toast.deleted); reload(); reloadStats(); } catch(e){ toast.error(e.message); } }}
         renderForm={p => <Form {...p} />}
       />
 
-      {totalPages > 1 && (
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:12, padding:'0 4px' }}>
-          <span style={{ fontSize:12, color:'var(--text-muted)' }}>
-            Page {page} / {totalPages} &mdash; {count} résultats
-          </span>
-          <div style={{ display:'flex', gap:6 }}>
-            <button className="sms-btn sms-btn-outline sms-btn-sm" onClick={() => setPage(1)} disabled={page === 1}>
-              <i className="fas fa-angle-double-left"></i>
-            </button>
-            <button className="sms-btn sms-btn-outline sms-btn-sm" onClick={() => setPage(p => Math.max(1, p-1))} disabled={page === 1}>
-              <i className="fas fa-chevron-left"></i> Préc.
-            </button>
-            <button className="sms-btn sms-btn-outline sms-btn-sm" onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page === totalPages}>
-              Suiv. <i className="fas fa-chevron-right"></i>
-            </button>
-            <button className="sms-btn sms-btn-outline sms-btn-sm" onClick={() => setPage(totalPages)} disabled={page === totalPages}>
-              <i className="fas fa-angle-double-right"></i>
-            </button>
-          </div>
-        </div>
-      )}
 
       {detailModal && <DetailModal facture={detailModal} onClose={() => setDetailModal(null)} />}
     </>
