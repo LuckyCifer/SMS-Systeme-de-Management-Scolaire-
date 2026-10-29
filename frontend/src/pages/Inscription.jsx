@@ -4,7 +4,8 @@ import AutocompleteField from '../components/AutocompleteField';
 import { useApp } from '../context/AppContext';
 import { usePdfPreview } from '../context/PdfPreviewContext';
 import { useApi, useMutation } from '../hooks/useApi';
-import { inscriptionService, paiementService, etudiantService, classeService } from '../services/endpoints';
+import { inscriptionService, paiementService, etudiantService, classeService, cycleService } from '../services/endpoints';
+import { useTr } from '../hooks/useTr';
 import { LoadingState, ErrorState } from '../components/ApiState';
 import { generateRecu } from '../services/pdfService';
 import api from '../services/api';
@@ -13,10 +14,17 @@ import { etabLabels } from '../utils/etabLabels';
 
 const SP_STYLE = { PAYE:'badge-success', PARTIEL:'badge-warning', EN_ATTENTE:'badge-danger' };
 const SP_LABEL = { PAYE:'Payé', PARTIEL:'Partiel', EN_ATTENTE:'En attente' };
+const PAGE_SIZE = 50;
 
 // ── Formulaire Inscription + Paiement simultané ───────────────────────────────
 function Form({ item, onClose, onSave, labels }) {
   const { t } = useApp();
+  const tr = useTr();
+  // Supérieur : cycles de l'école (BTS, Licence, Master…), choisis avant la classe.
+  const { data: cycles } = useApi(
+    useCallback(() => labels?.isSuperieur ? cycleService.list({ page_size: 100 }) : Promise.resolve({ data: [] }), [labels?.isSuperieur]),
+    [labels?.isSuperieur]
+  );
   const isEdit = Boolean(item?.code_inscription);
   // Afficher le bloc paiement si création OU si la situation n'est pas soldée
   const showPaiement = !isEdit || item?.statut_paiement !== 'PAYE';
@@ -37,6 +45,7 @@ function Form({ item, onClose, onSave, labels }) {
     mle_etudiant:     item?.mle_etudiant?.mle_etudiant || item?.mle_etudiant || '',
     code_classe:      item?.code_classe?.code_classe   || item?.code_classe  || '',
     code_annee:       item?.code_annee?.code_annee     || item?.code_annee   || '',
+    code_cycle:       item?.code_cycle || '',
     date_inscription: item?.date_inscription?.slice(0, 10) || today,
     mt_inscription:   item?.mt_inscription || 0,
     // Paiement des frais
@@ -57,6 +66,8 @@ function Form({ item, onClose, onSave, labels }) {
     setF(p => {
       const next = { ...p, [name]: value };
       if (name === 'mt_inscription' && !isEdit) next.mt_paye = value;
+      // Changer de cycle oblige à choisir une classe de ce cycle.
+      if (name === 'code_cycle' && value !== p.code_cycle) next.code_classe = '';
       return next;
     });
   };
@@ -68,7 +79,7 @@ function Form({ item, onClose, onSave, labels }) {
       : t.common.save;
 
   return (
-    <form onSubmit={e => { e.preventDefault(); onSave(f); }}>
+    <form onSubmit={e => { e.preventDefault(); onSave({ ...f, code_cycle: f.code_cycle || null }); }}>
 
       {/* ── Bloc 1 : Inscription administrative ── */}
       <div style={{
@@ -81,6 +92,12 @@ function Form({ item, onClose, onSave, labels }) {
           <i className="fas fa-file-signature" style={{ marginRight: 6 }}></i>
           {t.pages.inscriptions.adminSection}
         </div>
+        {labels?.isSuperieur && (
+          <FormField label={tr('Cycle', 'Cycle')} name="code_cycle" type="select" value={f.code_cycle} onChange={ch} required
+            options={(cycles || []).map(c => ({ value: c.code_cycle, label: c.lib_cycle }))}
+            help={tr('BTS, Licence, Master… Seules les classes de ce cycle sont proposées.',
+                     'BTS, Bachelor, Master… Only the classes of this cycle are offered.')} />
+        )}
         <div className="sms-form-row">
           <AutocompleteField
             label={labels?.studentLabel || t.fields.mleEtud} name="mle_etudiant" value={f.mle_etudiant} onChange={ch} required
@@ -91,11 +108,13 @@ function Form({ item, onClose, onSave, labels }) {
             placeholder="Rechercher par nom ou matricule…"
           />
           <AutocompleteField
+            key={`classe-${f.code_cycle}`}
             label={t.fields.classe} name="code_classe" value={f.code_classe} onChange={ch} required
             service={classeService}
+            extraParams={labels?.isSuperieur && f.code_cycle ? { code_cycle: f.code_cycle } : {}}
             labelFn={c => `${c.lib_classe || c.code_classe} (${c.code_classe})`}
             valueFn={c => c.code_classe}
-            initialLabel={item ? (item.lib_classe || item.code_classe?.code_classe || item.code_classe || '') : ''}
+            initialLabel={item && f.code_classe ? (item.lib_classe || item.code_classe?.code_classe || item.code_classe || '') : ''}
             placeholder="Rechercher une classe…"
           />
         </div>
@@ -170,6 +189,7 @@ function Form({ item, onClose, onSave, labels }) {
 // ── Page principale ───────────────────────────────────────────────────────────
 export default function Inscription() {
   const { t, toast, user, anneeActive, lang } = useApp();
+  const tr = useTr();
   const { showPreview } = usePdfPreview();
   const { typeEtab, systeme } = useEtablissement();
   const labels = etabLabels(typeEtab, systeme, lang);
@@ -179,6 +199,11 @@ export default function Inscription() {
   const [departements, setDepartements] = useState([]);
   const [specialites,  setSpecialites]  = useState([]);
   const [filteredSp,   setFilteredSp]   = useState([]);
+  const [cycleFilter,  setCycleFilter]  = useState('');
+  const { data: cycles } = useApi(
+    useCallback(() => labels.isSuperieur ? cycleService.list({ page_size: 100 }) : Promise.resolve({ data: [] }), [labels.isSuperieur]),
+    [labels.isSuperieur]
+  );
 
   useEffect(() => {
     Promise.all([
@@ -215,14 +240,20 @@ export default function Inscription() {
     [anneeActive, depFilter, spFilter]
   );
 
+  // Défilement infini et recherche côté serveur : toutes les inscriptions, pas les 50 premières.
+  const [page,         setPage]         = useState(1);
+  const [serverSearch, setServerSearch] = useState('');
+  useEffect(() => { setPage(1); }, [anneeActive, depFilter, spFilter, cycleFilter, serverSearch]);
   const { data, count, loading, error, reload } = useApi(
     () => inscriptionService.list({
-      page_size: 50,
-      ...(anneeActive ? { code_annee: anneeActive.code_annee } : {}),
-      ...(depFilter   ? { code_dep:   depFilter   } : {}),
-      ...(spFilter    ? { code_sp:    spFilter    } : {}),
+      page_size: PAGE_SIZE * page, page: 1,
+      ...(anneeActive  ? { code_annee: anneeActive.code_annee } : {}),
+      ...(depFilter    ? { code_dep:   depFilter   } : {}),
+      ...(spFilter     ? { code_sp:    spFilter    } : {}),
+      ...(cycleFilter  ? { code_cycle: cycleFilter } : {}),
+      ...(serverSearch ? { search:     serverSearch } : {}),
     }),
-    [anneeActive, depFilter, spFilter]
+    [anneeActive, depFilter, spFilter, cycleFilter, page, serverSearch]
   );
 
   const { mutate: createInsc } = useMutation(
@@ -299,6 +330,10 @@ export default function Inscription() {
     { key:'etud', label: t.fields.matricule, render: r => r.mle_etudiant?.mle_etudiant || r.mle_etudiant },
     { key:'nom',  label: labels.studentLabel, bold: true,
       render: r => r.nom_etudiant || r.mle_etudiant?.nom || '—' },
+    ...(labels.isSuperieur ? [{ key: 'cycle', label: tr('Cycle', 'Cycle'),
+      render: r => r.lib_cycle
+        ? <span className="sms-badge badge-info" style={{ fontSize: 10 }}>{r.lib_cycle}</span>
+        : <span style={{ color: 'var(--text-muted)' }}>—</span> }] : []),
     { key:'cls',  label: t.fields.classe,
       render: r => r.lib_classe || r.code_classe?.code_classe || r.code_classe },
     { key:'niv',  label: t.fields.niveau,
@@ -376,17 +411,24 @@ export default function Inscription() {
       <CrudTable
         title={t.pages.inscriptions.title}
         subtitle={t.pages.inscriptions.subtitle}
-        sortBy={r => r.nom_etudiant || r.mle_etudiant || ''}
         icon="fas fa-file-signature"
         columns={COLS}
         data={data || []}
         totalCount={count}
+        serverSide serverPage={page}
+        serverPages={Math.max(1, Math.ceil((count || 0) / PAGE_SIZE))}
+        onServerPage={setPage} onServerSearch={setServerSearch}
         addLabel={t.pages.inscriptions.addLabel}
         exportCsvUrl={`/api/inscriptions/export-csv/${[depFilter && `code_dep=${depFilter}`, spFilter && `code_sp=${spFilter}`].filter(Boolean).join('&') ? '?' + [depFilter && `code_dep=${depFilter}`, spFilter && `code_sp=${spFilter}`].filter(Boolean).join('&') : ''}`}
         filters={
           <div className="flex gap-2 items-center" style={{ flexWrap: 'wrap' }}>
             {/* Filière/Spécialité — supérieur uniquement */}
             {labels.isSuperieur && <>
+              <select className="sms-input" style={{ height: 34, minWidth: 160, fontSize: 12 }}
+                value={cycleFilter} onChange={e => setCycleFilter(e.target.value)}>
+                <option value="">{tr('Tous les cycles', 'All cycles')}</option>
+                {(cycles || []).map(c => <option key={c.code_cycle} value={c.code_cycle}>{c.lib_cycle}</option>)}
+              </select>
               <select className="sms-input" style={{ height: 34, minWidth: 180, fontSize: 12 }}
                 value={depFilter} onChange={e => setDepFilter(e.target.value)}>
                 <option value="">{labels.allDepsLabel}</option>
@@ -406,8 +448,8 @@ export default function Inscription() {
                 {departements.map(d => <option key={d.code_dep} value={d.code_dep}>{d.lib_dep}</option>)}
               </select>
             )}
-            {(depFilter || spFilter) && (
-              <button className="sms-btn-icon" onClick={() => { setDepFilter(''); setSpFilter(''); }} title={t.common.reset}>
+            {(depFilter || spFilter || cycleFilter) && (
+              <button className="sms-btn-icon" onClick={() => { setDepFilter(''); setSpFilter(''); setCycleFilter(''); }} title={t.common.reset}>
                 <i className="fas fa-times"></i>
               </button>
             )}

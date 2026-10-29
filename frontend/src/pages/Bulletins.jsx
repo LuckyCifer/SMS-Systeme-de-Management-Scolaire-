@@ -112,6 +112,8 @@ export default function Bulletins() {
       student.resultat,
       periodeLabel,
       etab,
+      // Secondaire : bulletin au format officiel (classe et période nécessaires).
+      { code_classe: selectedClasse, ...(parsePeriodeChoice(selectedPeriode) || {}) },
     );
   };
 

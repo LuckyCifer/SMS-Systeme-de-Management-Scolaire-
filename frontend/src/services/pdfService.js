@@ -53,6 +53,7 @@ const buildEtabHeader = (etab, logoBase64, docTitle, accentColor = '#1a3c5e') =>
                              font-weight:700;text-transform:uppercase;margin-bottom:2px;">${sigle}</div>` : ''}
       <div style="font-size:16px;font-weight:800;color:${accentColor};
                   text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;">${nom}</div>
+      ${etab?.devise ? `<div style="font-size:10px;font-style:italic;color:${accentColor};margin-bottom:3px;">${etab.devise}</div>` : ''}
       ${coordonnees ? `<div style="font-size:10px;color:#666;margin-bottom:6px;">${coordonnees}</div>` : ''}
       <div style="font-size:13px;font-weight:700;color:#333;
                   letter-spacing:2px;text-transform:uppercase;">${docTitle}</div>
@@ -125,14 +126,259 @@ const exportSinglePage = async (el, filename, { scale = 2, widthMm = 210 } = {})
   return { blob, filename };
 };
 
+// ── Bulletin du secondaire (format officiel des lycées et collèges camerounais) ──
+// En-tête bilingue République du Cameroun / Republic of Cameroon, identité de l'élève avec
+// photo, matières regroupées (littéraires, scientifiques, techniques, autres) avec les
+// notes des sous-périodes (séquences d'un trimestre, ou trimestres de l'année), moyenne,
+// coefficient, total, rang et appréciation, puis discipline, travail, profil de la classe
+// et décision. Tous les chiffres viennent de /api/evaluations/moyennes/ (api/notes.py) ;
+// seules les sommes des sous-totaux de groupe sont faites ici.
+// Délégation régionale : [français (avec son article), anglais].
+const REGIONS_FR_EN = {
+  ADAMAOUA: ["DE L'ADAMAOUA", 'ADAMAWA'], CENTRE: ['DU CENTRE', 'CENTRE'], EST: ["DE L'EST", 'EAST'],
+  EXTREME_NORD: ["DE L'EXTRÊME-NORD", 'FAR NORTH'], LITTORAL: ['DU LITTORAL', 'LITTORAL'], NORD: ['DU NORD', 'NORTH'],
+  NORD_OUEST: ['DU NORD-OUEST', 'NORTH WEST'], OUEST: ["DE L'OUEST", 'WEST'], SUD: ['DU SUD', 'SOUTH'],
+  SUD_OUEST: ['DU SUD-OUEST', 'SOUTH WEST'],
+};
+// Groupe de matières d'après le module de la matière.
+const GROUPES_MATIERES = [
+  { fr: '1er groupe : matières littéraires',  en: 'Group 1: Arts subjects',     modules: ['LIT', 'GEN', 'LITTECRIT', 'LITTORAL'] },
+  { fr: '2e groupe : matières scientifiques', en: 'Group 2: Science subjects',  modules: ['SCI', 'MATHS', 'ARITHM', 'ALGO', 'MATINFO'] },
+  { fr: 'Matières techniques et professionnelles', en: 'Technical subjects', modules: ['TEC', 'ELECTRICT', 'INDUSTRI'] },
+  { fr: '3e groupe : autres matières',        en: 'Group 3: Other subjects',   modules: null },   // le reste
+];
+
+const generateBulletinSecondaire = async (etudiant, resultat, etabData, ctx) => {
+  const { default: api } = await import('./api');
+  const liste = r => r.data?.results ?? r.data ?? [];
+  const mle = etudiant?.mle_etudiant || resultat?.mle_etudiant;
+
+  // ── Données ──
+  const [periodes, classe, matieresRef, cours, absences] = await Promise.all([
+    api.get('/api/periodes/', { params: { page_size: 500 } }).then(liste).catch(() => []),
+    api.get(`/api/classes/${ctx.code_classe}/`).then(r => r.data).catch(() => ({})),
+    api.get('/api/matieres/', { params: { page_size: 2000 } }).then(liste).catch(() => []),
+    api.get('/api/cours/', { params: { code_classe: ctx.code_classe, page_size: 500 } }).then(liste).catch(() => []),
+    api.get('/api/absences/', { params: { mle_etudiant: mle, page_size: 5000 } }).then(liste).catch(() => []),
+  ]);
+  const periode = ctx.code_periode ? periodes.find(p => String(p.code_periode) === String(ctx.code_periode)) : null;
+  const codeAnnee = ctx.code_annee || periode?.code_annee || '';
+  const parDate = (a, b) => String(a.date_debut || '').localeCompare(String(b.date_debut || ''));
+  // Sous-périodes affichées en colonnes : séquences d'un trimestre, ou trimestres de l'année.
+  let colonnes = [];
+  if (periode) colonnes = periodes.filter(p => String(p.periode_parent) === String(periode.code_periode)).sort(parDate);
+  else if (codeAnnee) colonnes = periodes.filter(p => p.code_annee === codeAnnee && !p.periode_parent && p.type_etab === 'SECONDAIRE').sort(parDate);
+  const notesColonnes = await Promise.all(colonnes.map(c =>
+    api.get('/api/evaluations/moyennes/', { params: { code_classe: ctx.code_classe, code_periode: c.code_periode, mle_etudiant: mle } })
+      .then(r => Object.fromEntries((r.data?.[0]?.matieres || []).map(m => [m.code_matiere, m.moyenne])))
+      .catch(() => ({}))));
+  const decision = ctx.code_annee
+    ? await api.get('/api/decisions/', { params: { mle_etudiant: mle, code_annee: ctx.code_annee } }).then(r => liste(r)[0]).catch(() => null)
+    : null;
+
+  // ── Langue : celle de la classe (anglophone = bulletin en anglais) ──
+  const anglo = classe?.systeme === 'ANGLOPHONE' || (!classe?.systeme && etabData?.systeme === 'ANGLOPHONE');
+  const L = (fr, en) => (anglo ? en : fr);
+  const fmt = v => (v === null || v === undefined || v === '') ? '' : Number(v).toFixed(2);
+  const rangTxt = (r, ex) => r ? `${r}${anglo ? ({ 1: 'st', 2: 'nd', 3: 'rd' }[r % 10] && ![11, 12, 13].includes(r % 100) ? { 1: 'st', 2: 'nd', 3: 'rd' }[r % 10] : 'th') : (r === 1 ? 'er' : 'e')}${ex ? (anglo ? ' =' : ' ex') : ''}` : '';
+  const dateFr = d => d ? new Date(String(d).slice(0, 10) + 'T00:00:00').toLocaleDateString('fr-FR') : '';
+
+  // ── En-tête ──
+  const logo  = etabData?.logo ? await fetchPhotoBase64(etabData.logo) : null;
+  const photo = etudiant?.photo_url ? await fetchPhotoBase64(etudiant.photo_url) : null;
+  const [regFr, regEn] = REGIONS_FR_EN[etabData?.region] || ['', ''];
+  const colEntete = (lignes) => `<div style="flex:1;text-align:center;font-size:8.5px;line-height:1.35;">${lignes.join('<br/>')}</div>`;
+  const entete = `
+    <div style="display:flex;align-items:center;gap:8px;">
+      ${colEntete(['<b>RÉPUBLIQUE DU CAMEROUN</b>', '<i>Paix – Travail – Patrie</i>', '*******',
+                   '<b>MINISTÈRE DES ENSEIGNEMENTS SECONDAIRES</b>', regFr ? `DÉLÉGATION RÉGIONALE ${regFr}` : '',
+                   `<b style="font-size:9.5px;">${(etabData?.lib_etab || '').toUpperCase()}</b>`])}
+      <div style="width:84px;text-align:center;">
+        ${logo ? `<img src="${logo}" style="height:70px;max-width:84px;object-fit:contain;"/>` : ''}
+        ${etabData?.devise ? `<div style="font-size:7px;font-style:italic;color:#1F3864;margin-top:2px;">${etabData.devise}</div>` : ''}
+      </div>
+      ${colEntete(['<b>REPUBLIC OF CAMEROON</b>', '<i>Peace – Work – Fatherland</i>', '*******',
+                   '<b>MINISTRY OF SECONDARY EDUCATION</b>', regEn ? `REGIONAL DELEGATION FOR THE ${regEn}` : '',
+                   `<b style="font-size:9.5px;">${(etabData?.lib_etab || '').toUpperCase()}</b>`])}
+    </div>`;
+
+  const titre = ctx.code_annee
+    ? L('BULLETIN SCOLAIRE ANNUEL', 'ANNUAL REPORT CARD')
+    : periode?.periode_parent
+      ? `${L('BULLETIN DE NOTES', 'REPORT CARD')} — ${(periode?.lib_periode || '').toUpperCase()}`
+      : `${L('BULLETIN DE NOTES DU', 'REPORT CARD —')} ${(periode?.lib_periode || '').replace(/ SEC$/, '').toUpperCase()}`;
+
+  // ── Identité ──
+  const cellule = (lib, val) => `<td style="padding:3px 6px;border:1px solid #444;font-size:9px;">
+      <span style="color:#444;">${lib} :</span> <b>${val || ''}</b></td>`;
+  const fille = etudiant?.sexe === 'F';
+  const identite = `
+    <div style="display:flex;gap:8px;margin-top:6px;">
+      <div style="width:72px;height:88px;border:1px solid #444;flex-shrink:0;display:flex;align-items:center;justify-content:center;
+                  font-size:8px;color:#999;overflow:hidden;">${photo ? `<img src="${photo}" style="width:72px;height:88px;object-fit:cover;"/>` : 'Photo'}</div>
+      <table style="flex:1;border-collapse:collapse;">
+        <tr>${cellule(L('Nom et prénoms', 'Name'), `${(etudiant?.nom || '').toUpperCase()} ${etudiant?.prenom || ''}`)}
+            ${cellule(L('Classe', 'Class'), classe?.lib_classe || etudiant?.lib_classe)}</tr>
+        <tr>${cellule(L(fille ? 'Née le' : 'Né le', 'Born on'), `${dateFr(etudiant?.date_naiss)} ${etudiant?.lieu ? L('à', 'at') + ' ' + etudiant.lieu : ''}`)}
+            ${cellule(L('Effectif', 'Class size'), resultat?.effectif)}</tr>
+        <tr>${cellule(L('Matricule', 'Registration N°'), mle)}
+            ${cellule(L('Sexe', 'Sex'), etudiant?.sexe === 'F' ? L('Féminin', 'Female') : etudiant?.sexe === 'M' ? L('Masculin', 'Male') : '')}</tr>
+        <tr>${cellule(L('Parent / Tuteur', 'Parent / Guardian'), etudiant?.nom_tuteur || etudiant?.nom_pere)}
+            ${cellule(L('Professeur principal', 'Class master'), '')}</tr>
+      </table>
+    </div>`;
+
+  // ── Tableau des matières ──
+  const moduleDe = Object.fromEntries(matieresRef.map(m => [m.code_matiere, m.code_module?.code_module || m.code_module]));
+  const ensDe = Object.fromEntries(cours.filter(c => !codeAnnee || c.code_annee === codeAnnee)
+    .map(c => [c.code_matiere?.code_matiere || c.code_matiere, c.nom_ens]));
+  const groupeDe = code => GROUPES_MATIERES.findIndex(g => !g.modules || g.modules.includes(moduleDe[code]));
+  const matieres = (resultat?.matieres || []).filter(m => m.poids !== null || m.moyenne !== null);
+  const th = 'padding:3px 4px;border:1px solid #444;font-size:8.5px;background:#D6E4F0;';
+  const td = 'padding:2px 4px;border:1px solid #444;font-size:9px;text-align:center;';
+  const colsTitres = colonnes.map(c => `<th style="${th}">${(c.lib_periode || '').replace('Séquence ', 'Séq. ').replace('Trimestre ', 'Trim. ').replace(/ SEC$/, '')}</th>`).join('');
+  let lignes = '';
+  let totalCoef = 0, totalPoints = 0;
+  GROUPES_MATIERES.forEach((g, gi) => {
+    const duGroupe = matieres.filter(m => groupeDe(m.code_matiere) === gi);
+    if (!duGroupe.length) return;
+    let coefG = 0, pointsG = 0;
+    duGroupe.forEach(m => {
+      const coef = m.poids ?? '';
+      const total = m.moyenne !== null && m.poids ? m.moyenne * m.poids : null;
+      if (total !== null) { coefG += m.poids; pointsG += total; }
+      lignes += `<tr>
+        <td style="${td}text-align:left;"><b>${m.lib_matiere}</b>${ensDe[m.code_matiere] ? `<div style="font-size:7.5px;color:#555;">${ensDe[m.code_matiere]}</div>` : ''}</td>
+        ${colonnes.map((c, ci) => `<td style="${td}">${fmt(notesColonnes[ci][m.code_matiere])}</td>`).join('')}
+        <td style="${td}font-weight:700;color:${m.moyenne !== null && m.moyenne < 10 ? '#b71c1c' : '#111'};">${m.dispense ? 'ABS. J' : fmt(m.moyenne)}</td>
+        <td style="${td}">${coef}</td>
+        <td style="${td}">${fmt(total)}</td>
+        <td style="${td}">${rangTxt(m.rang)}</td>
+        <td style="${td}">${fmt(m.moyenne_classe_matiere)}</td>
+        <td style="${td}text-align:left;font-size:8px;">${m.appreciation_bulletin ? L(m.appreciation_bulletin, m.appreciation_bulletin) : ''}</td>
+      </tr>`;
+    });
+    totalCoef += coefG; totalPoints += pointsG;
+    lignes += `<tr style="background:#eef3f8;font-weight:700;">
+      <td style="${td}text-align:left;font-size:8.5px;">${L(g.fr, g.en)}</td>
+      ${colonnes.map(() => `<td style="${td}"></td>`).join('')}
+      <td style="${td}">${coefG ? fmt(pointsG / coefG) : ''}</td><td style="${td}">${coefG || ''}</td>
+      <td style="${td}">${fmt(pointsG)}</td><td style="${td}" colspan="3"></td></tr>`;
+  });
+  const tableau = `
+    <table style="width:100%;border-collapse:collapse;margin-top:6px;">
+      <thead><tr>
+        <th style="${th}text-align:left;">${L('Matières / Enseignants', 'Subjects / Teachers')}</th>${colsTitres}
+        <th style="${th}">${L('Moy. /20', 'Avg /20')}</th><th style="${th}">Coef.</th><th style="${th}">${L('Total', 'Total')}</th>
+        <th style="${th}">${L('Rang', 'Rank')}</th><th style="${th}">${L('Moy. cl.', 'Cl. avg')}</th><th style="${th}">${L('Appréciation', 'Remark')}</th>
+      </tr></thead>
+      <tbody>${lignes}
+        <tr style="background:#1F3864;color:#fff;font-weight:700;">
+          <td style="${td}text-align:left;color:#fff;">${L('TOTAL GÉNÉRAL', 'GRAND TOTAL')}</td>
+          ${colonnes.map(() => `<td style="${td}"></td>`).join('')}
+          <td style="${td}color:#fff;">${fmt(resultat?.moyenne_generale)}</td><td style="${td}color:#fff;">${resultat?.total_poids ?? totalCoef}</td>
+          <td style="${td}color:#fff;">${fmt(resultat?.total_points ?? totalPoints)}</td>
+          <td style="${td}color:#fff;">${rangTxt(resultat?.rang, resultat?.ex_aequo)}${resultat?.effectif ? '/' + resultat.effectif : ''}</td>
+          <td style="${td}color:#fff;">${fmt(resultat?.moyenne_classe)}</td><td style="${td}color:#fff;">${resultat?.appreciation_travail || ''}</td>
+        </tr>
+      </tbody>
+    </table>`;
+
+  // ── Discipline (absences de la période) ──
+  // Bornes : la période choisie, ou pour l'année du début du 1er trimestre à la fin du dernier.
+  const debut = String(periode?.date_debut || colonnes[0]?.date_debut || '').slice(0, 10);
+  const fin   = String(periode?.date_fin || colonnes[colonnes.length - 1]?.date_fin || '').slice(0, 10);
+  const absPeriode = absences.filter(a => {
+    const d = String(a.date_seance || '');
+    return (!debut || d >= debut) && (!fin || d <= fin);
+  });
+  const heures = l => l.reduce((s, a) => s + Number(a.nb_heures || 0), 0);
+  const absentes = absPeriode.filter(a => !a.present);
+  const hJ  = heures(absentes.filter(a => a.justifiee));
+  const hNJ = heures(absentes.filter(a => !a.justifiee));
+  const retards = absPeriode.filter(a => a.present && Number(a.retard_minutes) > 0).length;
+  const case_ = coche => `<span style="display:inline-block;width:9px;height:9px;border:1px solid #333;margin-right:4px;vertical-align:middle;text-align:center;line-height:8px;font-size:8px;">${coche ? '✔' : ''}</span>`;
+  const bloc = (titreBloc, contenu, largeur) => `
+    <div style="width:${largeur};border:1px solid #444;">
+      <div style="background:#1F3864;color:#fff;font-size:8.5px;font-weight:700;padding:3px 6px;text-transform:uppercase;">${titreBloc}</div>
+      <div style="padding:5px 6px;font-size:8.5px;line-height:1.7;">${contenu}</div>
+    </div>`;
+  const moy = resultat?.moyenne_generale;
+  const discipline = bloc(L('Discipline', 'Conduct'), `
+    ${L('Absences justifiées', 'Excused absences')} : <b>${hJ ? Math.round(hJ) + ' h' : '0'}</b><br/>
+    ${L('Absences non justifiées', 'Unexcused absences')} : <b>${hNJ ? Math.round(hNJ) + ' h' : '0'}</b><br/>
+    ${L('Retards', 'Late arrivals')} : <b>${retards}</b><br/>
+    ${case_(false)}${L('Avertissement conduite', 'Conduct warning')}<br/>
+    ${case_(false)}${L('Blâme conduite', 'Conduct reprimand')}<br/>
+    ${case_(false)}${L('Exclusion temporaire', 'Suspension')}`, '31%');
+  const travail = bloc(L("Travail de l'élève", "Student's work"), `
+    ${L('Moyenne', 'Average')} : <b>${fmt(moy) || '—'}</b> / 20 &nbsp; ${L('Rang', 'Rank')} : <b>${rangTxt(resultat?.rang, resultat?.ex_aequo)}${resultat?.effectif ? ' / ' + resultat.effectif : ''}</b><br/>
+    ${L('Appréciation', 'Remark')} : <b>${resultat?.appreciation_travail || '—'}</b><br/>
+    ${case_(moy >= 12)}${L("Tableau d'honneur", 'Roll of honour')}<br/>
+    ${case_(moy >= 14)}${L('Encouragements', 'Encouragement')}<br/>
+    ${case_(moy >= 16)}${L('Félicitations', 'Congratulations')}<br/>
+    ${case_(moy !== null && moy !== undefined && moy < 8)}${L('Avertissement travail', 'Work warning')}`, '33%');
+  const profil = bloc(L('Profil de la classe', 'Class profile'), `
+    ${L('Moyenne de la classe', 'Class average')} : <b>${fmt(resultat?.moyenne_classe)}</b><br/>
+    ${L('Plus forte moyenne', 'Highest average')} : <b>${fmt(resultat?.moyenne_max)}</b><br/>
+    ${L('Plus faible moyenne', 'Lowest average')} : <b>${fmt(resultat?.moyenne_min)}</b><br/>
+    ${L('Taux de réussite', 'Pass rate')} : <b>${resultat?.taux_reussite ?? ''}${resultat?.taux_reussite !== null && resultat?.taux_reussite !== undefined ? ' %' : ''}</b><br/>
+    ${L('Effectif classé', 'Students ranked')} : <b>${resultat?.effectif ?? ''}</b>`, '33%');
+
+  const res = decision?.resultat;
+  const decisionBloc = ctx.code_annee ? `
+    <div style="margin-top:6px;border:1px solid #444;padding:5px 8px;font-size:9px;">
+      <b>${L('DÉCISION DU CONSEIL DE CLASSE', 'CLASS COUNCIL DECISION')} :</b> &nbsp;
+      ${case_(res === 'ADMIS')}${L('Admis(e) en classe supérieure', 'Promoted')} &nbsp;
+      ${case_(res === 'REDOUBLE')}${L('Redouble', 'Repeats')} &nbsp;
+      ${case_(res === 'EXCLU')}${L('Exclu(e)', 'Dismissed')}
+      ${decision?.observations ? `<div style="margin-top:3px;"><i>${decision.observations}</i></div>` : ''}
+    </div>` : '';
+  const signatures = `
+    <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:9px;">
+      <div style="width:30%;text-align:center;">${L('Visa du parent', "Parent's signature")}<div style="height:48px;"></div></div>
+      <div style="width:30%;text-align:center;">${L('Le Professeur principal', 'The Class master')}<div style="height:48px;"></div></div>
+      <div style="width:34%;text-align:center;">${etabData?.ville || ''}, ${L('le', 'on')} ${new Date().toLocaleDateString('fr-FR')}<br/>
+        <b>${L('Le Proviseur / Le Principal', 'The Principal')}</b><div style="height:42px;"></div>
+        <div style="font-size:8.5px;">${etabData?.directeur || ''}</div></div>
+    </div>`;
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;color:#111;background:#fff;width:760px;padding:16px 18px;">
+      ${entete}
+      <div style="text-align:center;margin:6px 0 2px;">
+        <div style="font-size:14px;font-weight:800;letter-spacing:1px;color:#1F3864;">${titre}</div>
+        <div style="font-size:10px;">${L('Année scolaire', 'School year')} : <b>${codeAnnee}</b></div>
+      </div>
+      ${identite}
+      ${tableau}
+      <div style="display:flex;justify-content:space-between;gap:6px;margin-top:6px;">${discipline}${travail}${profil}</div>
+      ${decisionBloc}
+      ${signatures}
+    </div>`;
+
+  const el = document.createElement('div');
+  el.innerHTML = html;
+  document.body.appendChild(el);
+  const result = await exportSinglePage(el, `bulletin_${mle || 'eleve'}.pdf`, { scale: 1.6 });
+  document.body.removeChild(el);
+  return result;
+};
+
 // ── Bulletin de notes ─────────────────────────────────────────────────────────
 // `resultat` : ligne de l'élève renvoyée par /api/evaluations/moyennes/ (api/notes.py) —
 // moyennes par matière, poids (coefficient ou crédits), moyenne générale, rang, effectif,
 // moyenne de classe, appréciations du primaire. Aucun calcul de moyenne ici : le bulletin
 // affiche exactement les mêmes chiffres que les relevés et les délibérations.
-export const generateBulletin = async (etudiant, resultat, periode, etab) => {
+//
+// `contexte` ({ code_classe, code_periode | code_annee }) : au secondaire, il permet le
+// bulletin au format officiel (voir generateBulletinSecondaire) ; sans lui, bulletin simple.
+export const generateBulletin = async (etudiant, resultat, periode, etab, contexte = null) => {
   // Établissement (paramètre ou localStorage)
   const etabData   = etab || getEtabFromStorage();
+  if (etabData?.type_etab === 'SECONDAIRE' && contexte?.code_classe) {
+    return generateBulletinSecondaire(etudiant, resultat, etabData, contexte);
+  }
   const logoBase64 = etabData?.logo ? await fetchPhotoBase64(etabData.logo) : null;
 
   // Photo de profil étudiant
@@ -437,9 +683,121 @@ export const generateRecu = async (paiement, user, etab) => {
   return result;
 };
 
+// ── Certificat de scolarité du primaire ──────────────────────────────────────
+// Modèle des écoles primaires camerounaises (« School attendance certificate / Certificat de
+// scolarité ») : la directrice ou le directeur atteste que l'élève, né(e) le … à …, fils/fille
+// de … et de …, est inscrit(e) en classe de … pour l'année scolaire …. La langue suit le
+// système de l'école : bilingue = anglais avec le français en italique dessous, comme sur les
+// certificats papier ; francophone ou anglophone = une seule langue.
+const generateCertificatPrimaire = async (etudiant, inscription, etabData, user) => {
+  const logoBase64 = etabData?.logo ? await fetchPhotoBase64(etabData.logo) : null;
+  const systeme = etabData?.systeme || 'FRANCOPHONE';
+  const fille   = etudiant?.sexe === 'F';
+  const fmtDate = d => (d ? new Date(String(d).slice(0, 10) + 'T00:00:00').toLocaleDateString('fr-FR') : '……………');
+  const vide    = '……………………………………';
+
+  // Libellé d'une rubrique selon la langue de l'école.
+  const rubrique = (en, fr) => {
+    if (systeme === 'ANGLOPHONE') return `<div style="font-size:12px;color:#333;">${en}</div>`;
+    if (systeme === 'FRANCOPHONE') return `<div style="font-size:12px;color:#333;">${fr}</div>`;
+    return `<div style="font-size:12px;color:#333;">${en}</div>
+            <div style="font-size:11px;color:#555;font-style:italic;">${fr}</div>`;
+  };
+  const ligne = (en, fr, valeur, grand = false) => `
+    <div style="display:flex;align-items:flex-end;gap:16px;margin:0 0 16px;">
+      <div style="width:190px;flex-shrink:0;">${rubrique(en, fr)}</div>
+      <div style="flex:1;border-bottom:1px dotted #999;padding-bottom:2px;font-family:'Times New Roman',serif;
+                  font-size:${grand ? 17 : 15}px;${grand ? 'font-weight:700;letter-spacing:.5px;' : ''}color:#0b2a55;">
+        ${valeur || vide}
+      </div>
+    </div>`;
+
+  const nomComplet = `${etudiant?.nom || ''} ${etudiant?.prenom || ''}`.trim().toUpperCase();
+  const directeur  = etabData?.directeur || '';
+  const etabNom    = etabData?.lib_etab || '';
+  const ville      = etabData?.ville || '';
+  const classe     = inscription?.lib_classe || inscription?.code_classe || '';
+  const annee      = (inscription?.code_annee || inscription?.lib_annee || '').toString().replace('-', '/');
+  const aujourdhui = new Date().toLocaleDateString('fr-FR');
+  const coordonnees = [etabData?.adresse, ville, etabData?.telephone || etabData?.tel, etabData?.email]
+    .filter(Boolean).join('  •  ');
+
+  const titre = systeme === 'ANGLOPHONE' ? ['SCHOOL ATTENDANCE CERTIFICATE', '']
+    : systeme === 'FRANCOPHONE' ? ['CERTIFICAT DE SCOLARITÉ', '']
+    : ['SCHOOL ATTENDANCE CERTIFICATE', 'CERTIFICAT DE SCOLARITÉ'];
+  const phrase = (en, fr) => systeme === 'ANGLOPHONE' ? `<div>${en}</div>`
+    : systeme === 'FRANCOPHONE' ? `<div>${fr}</div>`
+    : `<div>${en}</div><div style="font-style:italic;color:#444;">${fr}</div>`;
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;padding:34px 44px;color:#111;background:#fff;width:700px;margin:0 auto;">
+      <div style="display:flex;align-items:center;gap:18px;border-bottom:3px solid #1F3864;padding-bottom:12px;">
+        ${logoBase64 ? `<img src="${logoBase64}" alt="Logo" style="height:78px;max-width:110px;object-fit:contain;" />` : ''}
+        <div style="flex:1;text-align:center;">
+          <div style="font-size:19px;font-weight:800;color:#1F3864;text-transform:uppercase;letter-spacing:.5px;">${etabNom}</div>
+          ${etabData?.sigle ? `<div style="font-size:12px;font-weight:700;color:#2E74B5;">(${etabData.sigle})</div>` : ''}
+          ${coordonnees ? `<div style="font-size:10px;color:#555;margin-top:3px;">${coordonnees}</div>` : ''}
+        </div>
+      </div>
+      ${etabData?.devise ? `<div style="background:#1F3864;color:#fff;text-align:center;font-size:11px;font-weight:700;
+                                        letter-spacing:1px;text-transform:uppercase;padding:4px 8px;">${etabData.devise}</div>` : ''}
+
+      <div style="text-align:center;margin:26px 0 30px;">
+        <div style="font-size:15px;font-weight:700;text-decoration:underline;letter-spacing:1px;">${titre[0]}</div>
+        ${titre[1] ? `<div style="font-size:15px;font-style:italic;font-family:'Times New Roman',serif;margin-top:4px;">${titre[1]}</div>` : ''}
+      </div>
+
+      ${ligne('I, the undersigned', 'Je soussigné(e)', directeur)}
+      ${ligne('Head teacher of', 'Directeur (Directrice) de', etabNom)}
+      ${ligne('Certify that', 'Atteste que', nomComplet, true)}
+      ${ligne(`Born on`, fille ? 'Née le' : 'Né le',
+              `${fmtDate(etudiant?.date_naiss)} &nbsp;<span style="font-family:Arial;font-size:12px;color:#333;">${
+                systeme === 'FRANCOPHONE' ? 'à' : systeme === 'ANGLOPHONE' ? 'at' : 'at / à'}</span>&nbsp; ${etudiant?.lieu || '……………'}`)}
+      ${ligne('Admission N°', 'N° de matricule', etudiant?.mle_etudiant)}
+      ${ligne(fille ? 'Daughter of' : 'Son of', fille ? 'Fille de' : 'Fils de', etudiant?.nom_pere)}
+      ${ligne('And of', 'Et de', etudiant?.nom_mere)}
+      ${ligne('Is (was) a pupil in class', `Est (a été) régulièrement inscrit${fille ? 'e' : ''} en classe de`, classe)}
+      ${ligne('For the academic year', "Pour l'année scolaire", annee)}
+
+      <div style="font-size:12px;line-height:1.6;margin:22px 0 26px;">
+        ${phrase('This attendance certificate is issued to serve where ever need be.',
+                 'En foi de quoi nous lui délivrons le présent certificat de scolarité pour servir et valoir ce que de droit.')}
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;">
+        <div style="text-align:center;width:300px;">
+          <div style="font-size:13px;margin-bottom:6px;">
+            ${systeme === 'ANGLOPHONE' ? `${ville}, the ${aujourdhui}` : systeme === 'FRANCOPHONE' ? `Fait à ${ville}, le ${aujourdhui}`
+              : `${ville}, the / le ${aujourdhui}`}
+          </div>
+          <div style="font-size:12px;font-weight:700;">
+            ${systeme === 'ANGLOPHONE' ? 'The Head Teacher' : systeme === 'FRANCOPHONE' ? 'Le Directeur / La Directrice'
+              : 'The Head Teacher / Le Directeur (La Directrice)'}
+          </div>
+          <div style="height:90px;"></div>
+          <div style="border-top:1px solid #999;padding-top:4px;font-size:11px;color:#666;">
+            ${directeur ? `${directeur} — ` : ''}${systeme === 'ANGLOPHONE' ? 'Signature and stamp' : 'Signature et cachet'}
+          </div>
+        </div>
+      </div>
+
+      <div style="text-align:center;margin-top:26px;padding-top:8px;border-top:1px solid #eee;font-size:9px;color:#aaa;">
+        CERT-${etudiant?.mle_etudiant || ''}-${new Date().getFullYear()} — ${user?.nom_user || user?.login || ''} — SMS
+      </div>
+    </div>`;
+
+  const el = document.createElement('div');
+  el.innerHTML = html;
+  document.body.appendChild(el);
+  const result = await exportSinglePage(el, `certificat_scolarite_${etudiant?.mle_etudiant || 'eleve'}.pdf`);
+  document.body.removeChild(el);
+  return result;
+};
+
 // ── Certificat de scolarité ───────────────────────────────────────────────────
 export const generateCertificatScolarite = async (etudiant, inscription, etablissement, user) => {
   const etabData   = etablissement || getEtabFromStorage();
+  if (etabData?.type_etab === 'PRIMAIRE') return generateCertificatPrimaire(etudiant, inscription, etabData, user);
   const logoBase64 = etabData?.logo ? await fetchPhotoBase64(etabData.logo) : null;
 
   const nom       = `${etudiant?.nom || ''} ${etudiant?.prenom || ''}`.trim();
@@ -472,6 +830,7 @@ export const generateCertificatScolarite = async (etudiant, inscription, etablis
           style="height:80px;max-width:160px;object-fit:contain;" /></div>` : ''}
         ${etabData?.sigle ? `<div style="font-size:10px;color:#1a3c5e;letter-spacing:2px;font-weight:700;text-transform:uppercase;margin-bottom:2px;">${etabData.sigle}</div>` : ''}
         <div style="font-size:16px;font-weight:800;color:#1a3c5e;text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;">${etabNom}</div>
+        ${etabData?.devise ? `<div style="font-size:10px;font-style:italic;color:#1a3c5e;margin-bottom:3px;">${etabData.devise}</div>` : ''}
         ${certCoordonnees ? `<div style="font-size:10px;color:#666;margin-bottom:6px;">${certCoordonnees}</div>` : ''}
         <div style="font-size:13px;font-weight:700;color:#333;letter-spacing:2px;text-transform:uppercase;">CERTIFICAT DE SCOLARITÉ</div>
       </div>

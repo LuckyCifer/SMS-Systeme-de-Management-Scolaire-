@@ -141,7 +141,7 @@ function Form({ item, onClose, onSave }) {
   });
   useEffect(() => {
     Promise.all([
-      api.get('/api/etudiants/?page_size=200'),
+      api.get('/api/etudiants/?page_size=5000'),   // tous les élèves de l'école
       api.get('/api/annees/?page_size=20'),
     ]).then(([eR, aR]) => {
       setEts(eR.data.results ?? eR.data);
@@ -170,13 +170,8 @@ function Form({ item, onClose, onSave }) {
           </select>
         </div>
       </div>
-      <div className="sms-form-group">
-        <label className="sms-label">{labels.studentLabel} *</label>
-        <select className="sms-input" name="mle_etudiant" value={f.mle_etudiant} onChange={ch} required>
-          <option value="">{t.common.select}</option>
-          {etudiants.map(e => <option key={e.mle_etudiant} value={e.mle_etudiant}>{e.nom} {e.prenom||''} ({e.mle_etudiant})</option>)}
-        </select>
-      </div>
+      <FormField label={labels.studentLabel} name="mle_etudiant" type="searchable" value={f.mle_etudiant} onChange={ch} required
+        options={etudiants.map(e => ({ value: e.mle_etudiant, label: `${e.nom} ${e.prenom || ''} (${e.mle_etudiant})` }))} />
       <div className="sms-form-row">
         <FormField label={`${t.fields.montantTotal} *`} name="montant_total" type="number" value={f.montant_total} onChange={ch} required placeholder="Ex : 150 000" />
         <FormField label={t.fields.montantPaye}          name="montant_paye"  type="number" value={f.montant_paye}  onChange={ch} placeholder="Ex : 75 000" />

@@ -172,7 +172,8 @@ export default function MonDossier() {
       const classeLib = inscription?.lib_classe || etudiant?.lib_classe || '';
       const codeAnnee = inscription?.code_annee?.code_annee || inscription?.code_annee || anneeActive?.code_annee || '';
       const { blob, filename } = await generateBulletin(
-        { ...etudiant, lib_classe: classeLib }, resultat, `Année ${codeAnnee}`, etab);
+        { ...etudiant, lib_classe: classeLib }, resultat, `Année ${codeAnnee}`, etab,
+        { code_classe: inscription?.code_classe?.code_classe || inscription?.code_classe, code_annee: codeAnnee });
       showPreview(blob, filename);
     } catch { toast.error(t.errors.saving); }
     finally  { setGenerating(false); }

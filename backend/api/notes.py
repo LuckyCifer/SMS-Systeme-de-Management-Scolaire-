@@ -55,6 +55,17 @@ def mention_depuis_moyenne(moyenne):
     return 'Passable'
 
 
+# Appréciation d'une moyenne sur le bulletin du secondaire (matière ou moyenne générale).
+ECHELLE_APPRECIATION = [(18, 'Excellent'), (16, 'Très bien'), (14, 'Bien'), (12, 'Assez bien'),
+                        (10, 'Passable'), (8, 'Insuffisant'), (5, 'Faible'), (0, 'Très faible')]
+
+
+def appreciation_bulletin(moyenne):
+    if moyenne is None:
+        return None
+    return next(lib for seuil, lib in ECHELLE_APPRECIATION if moyenne >= seuil)
+
+
 def type_etab_classe(code_classe_id, etablissement_id=None):
     """Type d'établissement (PRIMAIRE/SECONDAIRE/SUPERIEUR) d'une évaluation ou d'une classe."""
     from .models import Classe, Etablissement
@@ -136,10 +147,16 @@ def importer_fiche(fiche):
 SERIES_LANGUES      = ['ALLEMAND', 'ESPAGNOL', 'LATIN', 'CHINOIS']   # 4ème / 3ème
 SERIES_FRANCOPHONES = ['A', 'C', 'D', 'E', 'TI']
 SERIES_ANGLOPHONES  = ['ARTS', 'SCIENCE']
+# Enseignement technique industriel : spécialité du CAP au premier cycle, série du
+# baccalauréat technique au second cycle.
+SERIES_TECH_CAP     = ['ELEC', 'ELN', 'MACO', 'IS', 'FC', 'MEB']
+SERIES_TECH_BAC     = ['F2', 'F3', 'F4', 'F5', 'IS', 'IB', 'MEB']
 NIVEAUX_AVEC_SERIE  = {
     '4EME_FR': SERIES_LANGUES, '3EME_FR': SERIES_LANGUES,
     '2NDE_FR': SERIES_FRANCOPHONES, '1ERE_FR': SERIES_FRANCOPHONES, 'TLE_FR': SERIES_FRANCOPHONES,
     'LS_EN': SERIES_ANGLOPHONES, 'US_EN': SERIES_ANGLOPHONES,
+    '1AN_TECH': SERIES_TECH_CAP, '2AN_TECH': SERIES_TECH_CAP, '3AN_TECH': SERIES_TECH_CAP, '4AN_TECH': SERIES_TECH_CAP,
+    '2NDE_TECH': SERIES_TECH_BAC, '1ERE_TECH': SERIES_TECH_BAC, 'TLE_TECH': SERIES_TECH_BAC,
 }
 
 
@@ -362,11 +379,45 @@ def classer(resultats):
 
     moy_classe = (round(sum(r['moyenne_generale'] for r in notes) / len(notes), 2)
                   if notes else None)
+    # Profil de la classe (bulletin) : plus forte et plus faible moyenne, part des élèves
+    # ayant au moins 10.
+    moyennes = [r['moyenne_generale'] for r in notes]
+    profil = {
+        'moyenne_max':   max(moyennes) if moyennes else None,
+        'moyenne_min':   min(moyennes) if moyennes else None,
+        'taux_reussite': round(100 * sum(m >= 10 for m in moyennes) / len(moyennes), 1) if moyennes else None,
+    }
     resultats[:] = notes + sans_moyenne
     for r in resultats:
         r['effectif']       = len(notes)
         r['moyenne_classe'] = moy_classe
+        r['appreciation_travail'] = appreciation_bulletin(r['moyenne_generale'])
+        r.update(profil)
+    classer_matieres(resultats)
     return resultats
+
+
+def classer_matieres(resultats):
+    """
+    Pour chaque matière : rang de l'élève dans la classe (même règle « olympique » que le
+    rang général), effectif noté et moyenne de la classe dans la matière.
+    """
+    par_matiere = {}
+    for r in resultats:
+        for m in r.get('matieres', []):
+            par_matiere.setdefault(m['code_matiere'], []).append(m)
+    for lignes in par_matiere.values():
+        notees = sorted((m for m in lignes if m.get('moyenne') is not None), key=lambda m: -m['moyenne'])
+        moy = round(sum(m['moyenne'] for m in notees) / len(notees), 2) if notees else None
+        rang_prec, moy_prec = None, None
+        for i, m in enumerate(notees):
+            rang = rang_prec if m['moyenne'] == moy_prec else i + 1
+            m['rang'], rang_prec, moy_prec = rang, rang, m['moyenne']
+        for m in lignes:
+            m.setdefault('rang', None)
+            m['effectif_matiere'] = len(notees)
+            m['moyenne_classe_matiere'] = moy
+            m['appreciation_bulletin'] = appreciation_bulletin(m.get('moyenne'))
 
 
 # ── Délibération ──────────────────────────────────────────────────────────────

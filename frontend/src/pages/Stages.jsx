@@ -24,7 +24,8 @@ function Form({ item, onClose, onSave }) {
     statut: item?.statut || 'EN_ATTENTE',
   });
   useEffect(() => {
-    api.get('/api/etudiants/?page_size=200').then(r => setEts(r.data.results ?? r.data)).finally(() => setLoad(false));
+    // Tous les élèves de l'école (le serveur plafonne à 5000), choisis par saisie dans la liste.
+    api.get('/api/etudiants/?page_size=5000').then(r => setEts(r.data.results ?? r.data)).finally(() => setLoad(false));
   }, []);
   const ch = e => setF(p => ({ ...p, [e.target.name]: e.target.value }));
   if (loading) return <div style={{ padding:40, textAlign:'center' }}><div className="sms-spinner" style={{ width:32, height:32, margin:'auto' }}></div></div>;
@@ -44,13 +45,8 @@ function Form({ item, onClose, onSave }) {
   return (
     <form onSubmit={e => { e.preventDefault(); onSave(f); }}>
       <div className="sms-form-row">
-        <div className="sms-form-group">
-          <label className="sms-label">{t.fields.nomEtud} *</label>
-          <select className="sms-input" name="mle_etudiant" value={f.mle_etudiant} onChange={ch} required>
-            <option value="">{t.common.select}</option>
-            {etudiants.map(e => <option key={e.mle_etudiant} value={e.mle_etudiant}>{e.nom} {e.prenom||''} ({e.mle_etudiant})</option>)}
-          </select>
-        </div>
+        <FormField label={t.fields.nomEtud} name="mle_etudiant" type="searchable" value={f.mle_etudiant} onChange={ch} required
+          options={etudiants.map(e => ({ value: e.mle_etudiant, label: `${e.nom} ${e.prenom || ''} (${e.mle_etudiant})` }))} />
         <FormField label={`${t.fields.annee} *`} name="code_annee" value={f.code_annee} onChange={ch} required placeholder="2025-2026" />
       </div>
       <FormField label={`${t.fields.entreprise} *`} name="entreprise" value={f.entreprise} onChange={ch} required />

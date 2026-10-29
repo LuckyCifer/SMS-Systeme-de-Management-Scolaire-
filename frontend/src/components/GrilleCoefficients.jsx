@@ -12,7 +12,7 @@ import { useApi } from '../hooks/useApi';
 import { useEtablissement } from '../hooks/useEtablissement';
 import { getUser } from '../utils/Auth';
 import { useTr } from '../hooks/useTr';
-import { anneeService, niveauScolaireService, matiereService, coefficientService } from '../services/endpoints';
+import { anneeService, niveauScolaireService, matiereService, coefficientService, classeService } from '../services/endpoints';
 import { LoadingState } from './ApiState';
 import { LIB_SERIE } from '../utils/notes';
 
@@ -44,6 +44,11 @@ export default function GrilleCoefficients() {
   }) : Promise.resolve({ data: [] }), [typeEtab, systeme]), [typeEtab, systeme]);
 
   const { data: matieres } = useApi(useCallback(() => matiereService.list({ page_size: 500 }), []));
+  // Niveaux proposés : ceux où l'école a des classes (un lycée technique ne voit pas la 6ème
+  // du général) ; tous les niveaux de son type tant qu'elle n'a aucune classe.
+  const { data: classesEcole } = useApi(useCallback(() => classeService.list({ page_size: 1000 }), []));
+  const niveauxEcole = new Set((classesEcole || []).map(c => c.niveau_scolaire).filter(Boolean));
+  const niveauxProposes = (niveaux || []).filter(n => !niveauxEcole.size || niveauxEcole.has(n.code_niveau));
 
   const charger = useCallback(async () => {
     if (!codeAnnee || !niveau) { setGrille(null); return; }
@@ -129,7 +134,7 @@ export default function GrilleCoefficients() {
             <label className="sms-label">{t.fields.niveau}</label>
             <select className="sms-input" value={niveau} onChange={e => setNiveau(e.target.value)}>
               <option value="">{t.common.select}</option>
-              {(niveaux || []).map(n => <option key={n.code_niveau} value={n.code_niveau}>{n.lib_niveau}</option>)}
+              {niveauxProposes.map(n => <option key={n.code_niveau} value={n.code_niveau}>{n.lib_niveau}</option>)}
             </select>
           </div>
           {peutModifier && codeAnnee && (

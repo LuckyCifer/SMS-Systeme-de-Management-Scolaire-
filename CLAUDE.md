@@ -86,7 +86,7 @@ Projet SMS/
 ### 4.1 Référentiels et structure
 | Modèle | Table | Portée | Description |
 |---|---|---|---|
-| `Etablissement` | `etablissement` | — | Écoles : `type_etab` (PRIMAIRE / SECONDAIRE / SUPERIEUR), `systeme` (FRANCOPHONE / ANGLOPHONE / BILINGUE), statut, agrément |
+| `Etablissement` | `etablissement` | — | Écoles : `type_etab` (PRIMAIRE / SECONDAIRE / SUPERIEUR), `systeme` (FRANCOPHONE / ANGLOPHONE / BILINGUE), statut, agrément, `devise` (imprimée sur les certificats et PDF). Certificat de scolarité : modèle propre au primaire (bilingue selon `systeme`, `pdfService.generateCertificatScolarite`) |
 | `NiveauScolaire` | `niveau_scolaire` | Commun | Niveaux nationaux (6EME_FR, 1ERE_FR, LS_EN, CM2_FR, L1_SUP…) |
 | `Annee` | `annee` | Commun | Années scolaires (`code_annee`, ex. 2025-2026) |
 | `Periode` | `periode` | Commun par type | Trimestres / semestres ; une séquence a un `periode_parent` (son trimestre) |
@@ -111,6 +111,7 @@ Projet SMS/
 | `Pension`, `Frais` | École | Pensions (scolarité, APEE…) et frais |
 | `Tranche` | (pension) | Tranches de paiement |
 | `Inscription`, `Paiement`, `Moratoire`, `Facture` | École | Inscriptions, paiements, échéanciers, factures |
+| `Inscription.code_cycle` | (cycle de l'école) | Supérieur : cycle choisi à l'inscription (BTS, Licence, Master…, modèle `Cycle`). Il doit correspondre à la classe (classe → `Niveau` interne → cycle), sinon refus ; à défaut, il est déduit de la classe. Le formulaire ne propose que les classes du cycle (`/api/classes/?code_cycle=`). Vide au primaire et au secondaire (migration 0034) |
 | `FraisInscription`, `FactureDetail` | (inscription, facture) | Détails |
 | `PaiementSalaire`, `RapportFinancier` | École | Salaires, rapports financiers |
 
@@ -197,6 +198,7 @@ Projet SMS/
   - 4ème et 3ème : la troisième langue (ALLEMAND, ESPAGNOL, LATIN, CHINOIS) ;
   - 2nde, 1ère et Tle : A, C, D, E, TI ;
   - Lower et Upper Sixth : ARTS, SCIENCE ;
+  - enseignement technique industriel (niveaux `1AN_TECH` à `4AN_TECH` jusqu'au CAP, puis `2NDE_TECH`, `1ERE_TECH`, `TLE_TECH`, créés par la migration 0033) : spécialité du CAP au premier cycle (ELEC, ELN, MACO, IS, FC, MEB), série du bac technique au second cycle (F2, F3, F4, F5, IS, IB, MEB) ;
   - aucune série en 6ème, en 5ème ni au primaire. Dans « 6ème A », la lettre désigne un groupe, pas une série.
 - **Grille des coefficients** : page `/coefficients`. API `/api/coefficients/grille/`, `enregistrer-grille/` et `copier/` (copie d'une année sur l'autre).
 - **Primaire** : note /20, avec l'appréciation déduite (< 10 NA, < 15 ECA, ≥ 15 A) dans `Evaluation.save()` et pour les moyennes.
@@ -205,7 +207,7 @@ Projet SMS/
   - Pré-bac : ADMIS si la moyenne annuelle atteint le seuil, sinon REDOUBLE.
   - Supérieur : une matière est validée à partir de 10 ; la compensation s'applique sauf si une matière est sous sa `note_elim`.
   - Les saisies du jury sont conservées.
-- **Bulletins PDF** : `pdfService.generateBulletin(etudiant, resultat, periode, etab)`, appelé par les pages Notes, Bulletins et Mon dossier.
+- **Bulletins PDF** : `pdfService.generateBulletin(etudiant, resultat, periode, etab, contexte)`, appelé par les pages Notes, Bulletins et Mon dossier. Au secondaire, avec `contexte = { code_classe, code_periode | code_annee }`, bulletin au format officiel camerounais (`generateBulletinSecondaire`) : en-tête bilingue MINESEC, matières par groupes (selon le module) avec notes des séquences ou des trimestres, rang et moyenne de classe par matière, appréciation (`notes.appreciation_bulletin`), discipline, travail, profil de la classe (`moyenne_max`, `moyenne_min`, `taux_reussite`, calculés dans `notes.classer`) et décision du conseil.
 
 ### 8.1 Fiches de notes (saisie des enseignants)
 - **Circuit** : BROUILLON (l'enseignant saisit) → `soumettre/` → SOUMIS → `valider/` (censeur / administration) → VALIDE, avec report immédiat des notes dans `Evaluation` (`notes.importer_fiche`). `rouvrir/` ramène la fiche en brouillon pour correction. `importer/` est un ancien alias de `valider/`.
@@ -264,6 +266,9 @@ docker compose stop             # arrête sans rien perdre
   - `test api --noinput` ;
   - `deduire_niveaux_series` : niveaux et séries des classes ; aperçu par défaut, `--appliquer` pour enregistrer ;
   - `rattacher_donnees_ecoles` : rattache à leur école les données sans école ; aperçu par défaut ;
+  - `configurer_ltca` : crée et paramètre le Lycée Technique Charles Atangana (sections, 45 salles et 6 ateliers, 45 classes, cours, coefficients, APEE, pauses, comptes `ltca_*`) ; aperçu par défaut, relançable ;
+  - `seed_ltca` : données fictives du LTCA au niveau de Mbouda (2025-2026 et 2026-2027 : élèves, enseignants, emplois du temps, séances, notes, paiements, examens…) ; aperçu par défaut, refuse de tourner deux fois ;
+  - `supprimer_etablissement CODE…` : supprime une école et toutes ses données, comptes compris ; aperçu par défaut, `--appliquer` pour supprimer (irréversible : sauvegarder la base avant, dans `backups/`, ignoré par git) ;
   - `cours_annuels` : passe les cours du primaire et du secondaire en « Année entière » et fusionne les doublons S1/S2 ou T1/T2/T3 ; aperçu par défaut (appliquée le 16/10/2026). À relancer après les anciens seeds (seed_cameroun, seed_complet…), qui créent encore des cours en S1.
 - Vite tourne avec `SMS_VITE_POLLING=true` (sinon les modifications faites sous Windows ne sont pas vues dans le conteneur), et son cache est dans le volume `vite_cache`.
 - Shell : Luc utilise l'Invite de commandes (cmd). Exemple de variable : `set SEED_DEMO=false`, et non `$env:…`.

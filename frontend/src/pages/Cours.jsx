@@ -13,6 +13,8 @@ import { useEtablissement } from '../hooks/useEtablissement';
 import { etabLabels } from '../utils/etabLabels';
 
 // ── Formulaire ────────────────────────────────────────────────────────────────
+const PAGE_SIZE = 50;
+
 export function CoursForm({ item, onClose, onSave, labels }) {
   const { t } = useApp();
   const tr = useTr();
@@ -185,15 +187,20 @@ export default function Cours() {
     }
   }, [depFilter, specialites]);
 
-  const { data, loading, error, reload } = useApi(
+  // Défilement infini et recherche côté serveur : tous les cours, pas seulement les premiers.
+  const [page,         setPage]         = useState(1);
+  const [serverSearch, setServerSearch] = useState('');
+  useEffect(() => { setPage(1); }, [anneeActive, depFilter, spFilter, classeFilter, serverSearch]);
+  const { data, count, loading, error, reload } = useApi(
     () => coursService.list({
-      page_size: 200,
+      page_size: PAGE_SIZE * page, page: 1,
       ...(anneeActive    ? { code_annee:  anneeActive.code_annee } : {}),
       ...(depFilter      ? { code_dep:    depFilter   } : {}),
       ...(spFilter       ? { code_sp:     spFilter    } : {}),
       ...(classeFilter   ? { code_classe: classeFilter} : {}),
+      ...(serverSearch   ? { search:      serverSearch } : {}),
     }),
-    [anneeActive, depFilter, spFilter, classeFilter]
+    [anneeActive, depFilter, spFilter, classeFilter, page, serverSearch]
   );
   const { mutate: create } = useMutation(useCallback(d => coursService.create(d), []));
   const { mutate: update } = useMutation(useCallback(d => coursService.update(d.id, d), []));
@@ -267,10 +274,12 @@ export default function Cours() {
     <CrudTable
       title={t.pages.courses.title}
       subtitle={t.pages.courses.subtitle}
-      sortBy={r => r.lib_matiere || ''}
       icon="fas fa-book-open"
       columns={COLS}
       data={data || []}
+      totalCount={count} serverSide serverPage={page}
+      serverPages={Math.max(1, Math.ceil((count || 0) / PAGE_SIZE))}
+      onServerPage={setPage} onServerSearch={setServerSearch}
       addLabel={t.pages.courses.addLabel}
       filters={filtersNode}
       onAdd={async d => {

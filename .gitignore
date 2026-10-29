@@ -109,3 +109,6 @@ Commandes\ de\ démarrage.txt
 backend/check_cols.py
 backend/create_users.py
 backend/import_planning.py
+
+# Sauvegardes locales de la base (données personnelles)
+backups/

@@ -14,6 +14,11 @@ from .notes import NIVEAUX_AVEC_SERIE
 
 # (motif sur le libellé normalisé, code NiveauScolaire, remarque éventuelle)
 _NIVEAUX = [
+    # Technique (avant le général : « 1ère année » n'est pas la classe de Première).
+    (r'\b([1-4])\s*(?:e|ere|eme)?\s*annee\b',    '{0}AN_TECH', None),
+    (r'\b(2nde|2nd|2de|seconde)\s+(?=(?:f[2-5]|is|ib|meb)\b)', '2NDE_TECH', None),
+    (r'\b(1ere|1re|premiere)\s+(?=(?:f[2-5]|is|ib|meb)\b)',    '1ERE_TECH', None),
+    (r'\b(tle|terminale|term)\s+(?=(?:f[2-5]|is|ib|meb)\b)',   'TLE_TECH',  None),
     (r'\b6\s*(e|eme)\b',                        '6EME_FR', None),
     (r'\b5\s*(e|eme)\b',                        '5EME_FR', None),
     (r'\b4\s*(e|eme)\b',                        '4EME_FR', None),
@@ -62,7 +67,13 @@ def deduire_niveau_serie(lib_classe):
         return {'niveau': None, 'serie': '', 'remarque': 'Niveau non reconnu'}
 
     serie = ''
-    if niveau in ('4EME_FR', '3EME_FR'):
+    if niveau.endswith('_TECH'):
+        # Spécialité ou série technique écrite après le niveau (« 2ème année ELEC », « Tle F4 »).
+        codes = NIVEAUX_AVEC_SERIE[niveau]
+        serie = next((c for c in re.findall(r'[a-z0-9]+', texte) if c.upper() in codes), '').upper()
+        if not serie:
+            remarque = 'Spécialité ou série technique à compléter'
+    elif niveau in ('4EME_FR', '3EME_FR'):
         serie = next((code for motif, code in _LANGUES if re.search(motif, texte)), '')
         if not serie:
             remarque = 'Troisième langue (série) à compléter'

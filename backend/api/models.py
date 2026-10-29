@@ -24,6 +24,20 @@ SERIE_CHOICES = [
     ('TI',      'Série TI'),
     ('ARTS',    'Arts'),
     ('SCIENCE', 'Science'),
+    # Enseignement technique industriel. Premier cycle (1ère à 4ème année, CAP) : spécialité.
+    ('ELEC',    'Électricité'),
+    ('ELN',     'Électronique'),
+    ('MACO',    'Maçonnerie'),
+    ('FC',      'Froid et climatisation'),
+    # Spécialités présentes aux deux cycles.
+    ('IS',      'Installation sanitaire'),
+    ('MEB',     'Menuiserie-ébénisterie'),
+    # Second cycle (seconde, première, terminale techniques) : série du baccalauréat technique.
+    ('F2',      'Série F2 — Électronique'),
+    ('F3',      'Série F3 — Électrotechnique'),
+    ('F4',      'Série F4 — Génie civil'),
+    ('F5',      'Série F5 — Froid et climatisation'),
+    ('IB',      'Industrie du bois'),
 ]
 
 APPRECIATION_CHOICES = [
@@ -227,6 +241,9 @@ class Etablissement(models.Model):
     code_etab           = models.CharField(max_length=10, primary_key=True)
     lib_etab            = models.CharField(max_length=200)
     sigle               = models.CharField(max_length=20, blank=True)
+    # Devise de l'école (ex. « Discipline – Travail – Réussite »), imprimée sous son nom sur
+    # les certificats et documents PDF.
+    devise              = models.CharField(max_length=200, null=True, blank=True)
     type_etab           = models.CharField(max_length=20, choices=TYPE_CHOICES, default='SUPERIEUR')
     statut              = models.CharField(max_length=20, choices=STATUT_CHOICES, default='PRIVE_LAIQUE')
     systeme             = models.CharField(max_length=15, choices=SYSTEME_CHOICES, default='FRANCOPHONE')
@@ -764,6 +781,11 @@ class Inscription(models.Model):
     etablissement = models.ForeignKey(
         'Etablissement', on_delete=models.CASCADE, null=True, blank=True,
         db_column='etablissement_id', related_name='+',
+    )
+    # Supérieur : cycle choisi à l'inscription (BTS, Licence, Master…, cycles de l'école).
+    # Il doit correspondre à celui de la classe (classe → niveau interne → cycle).
+    code_cycle = models.ForeignKey(
+        Cycle, on_delete=models.SET_NULL, null=True, blank=True, db_column='code_cycle', related_name='+',
     )
     class Meta:
         db_table        = 'inscription'

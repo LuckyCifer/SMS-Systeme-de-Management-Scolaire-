@@ -1,6 +1,7 @@
 """
 seed_cameroun.py — Données camerounaises réalistes SMS
-3 établissements complets : PRIMAIRE (EPPM) / SECONDAIRE (LBN) / SUPERIEUR (ISTA)
+2 établissements complets : PRIMAIRE (EPPM) / SUPERIEUR (ISTA)
+(le Lycée Bilingue de Nkolbisson, LBN, a été retiré le 26/10/2026 ; voir configurer_ltca)
 Idempotent — relançable sans risque de doublons.
 
 Usage : python manage.py seed_cameroun
@@ -89,7 +90,7 @@ def _statut_paiement():
 
 
 class Command(BaseCommand):
-    help = 'Peuple la base avec des données camerounaises réalistes (EPPM, LBN, ISTA)'
+    help = 'Peuple la base avec des données camerounaises réalistes (EPPM, ISTA)'
 
     def handle(self, *args, **options):
         with transaction.atomic():
@@ -97,7 +98,6 @@ class Command(BaseCommand):
             self._modules()
             self._types_eval()
             stats_eppm = self._seed_eppm()
-            stats_lbn  = self._seed_lbn()
             stats_ista = self._seed_ista()
             self._super_admin()
 
@@ -108,11 +108,6 @@ class Command(BaseCommand):
             f'{stats_eppm["evals"]} évaluations'
         )
         self.stdout.write(
-            f'  LBN  : {stats_lbn["eleves"]} élèves, '
-            f'{stats_lbn["ens"]} enseignants, '
-            f'{stats_lbn["evals"]} évaluations'
-        )
-        self.stdout.write(
             f'  ISTA : {stats_ista["eleves"]} étudiants, '
             f'{stats_ista["ens"]} enseignants, '
             f'{stats_ista["evals"]} évaluations'
@@ -120,7 +115,7 @@ class Command(BaseCommand):
         self.stdout.write('\n  Mot de passe tous comptes : Demo2026!\n')
         self.stdout.write('  Comptes disponibles :')
         self.stdout.write('    SUPER_ADMIN  -> lucky_admin')
-        for etab in ['eppm', 'lbn', 'ista']:
+        for etab in ['eppm', 'ista']:
             for role in ['admin', 'scol', 'ens', 'compt', 'etud']:
                 self.stdout.write(f'    {etab}_{role}')
 
@@ -689,324 +684,6 @@ class Command(BaseCommand):
 
         self.stdout.write(f'\n  [OK] Maternelle EPPM - 30 eleves (20 fr + 10 en), 4 enseignantes')
         return nb_evals
-
-    # ────────────────────────────────────────────────────────────────────────────
-    # LBN — Lycée Bilingue de Nkolbisson
-    # ────────────────────────────────────────────────────────────────────────────
-
-    def _seed_lbn(self):
-        CODE = 'LBN'
-        self.stdout.write(f'\n[2/3] Création LBN — Lycée Bilingue de Nkolbisson...')
-
-        etab, _ = Etablissement.objects.get_or_create(
-            code_etab=CODE,
-            defaults={
-                'lib_etab':          'Lycée Bilingue de Nkolbisson',
-                'sigle':             CODE,
-                'type_etab':         'SECONDAIRE',
-                'statut':            'PUBLIC',
-                'systeme':           'BILINGUE',
-                'region':            'CENTRE',
-                'ville':             'Yaoundé',
-                'adresse':           'Nkolbisson, Route de Bafoussam, Yaoundé',
-                'telephone':         '+237 222 32 44 55',
-                'directeur':         'M. ZANGA Théodore (Proviseur)',
-                'ministere_tutelle': 'Ministère des Enseignements Secondaires (MINESEC)',
-            }
-        )
-
-        pension, _ = Pension.objects.get_or_create(
-            lib_pension='APE + Sport + COGES LBN',
-            defaults={'mt_pension': 22500, 'mt_inscription': 5000, 'nb_tranche': 2, 'type_etab': 'SECONDAIRE'}
-        )
-        tr1, _ = Tranche.objects.get_or_create(
-            lib_tranche='T1-LBN', code_pension=pension,
-            defaults={'mt_tranche': 12500}
-        )
-        tr2, _ = Tranche.objects.get_or_create(
-            lib_tranche='T2-LBN', code_pension=pension,
-            defaults={'mt_tranche': 10000}
-        )
-
-        cyc1, _ = Cycle.objects.get_or_create(
-            code_cycle='CYC_COL',
-            defaults={'lib_cycle': 'Cycle 1 — Collège', 'code_pension': pension, 'type_etab': 'SECONDAIRE'}
-        )
-        cyc2, _ = Cycle.objects.get_or_create(
-            code_cycle='CYC_LYC',
-            defaults={'lib_cycle': 'Cycle 2 — Lycée', 'code_pension': pension, 'type_etab': 'SECONDAIRE'}
-        )
-
-        dep_fr, _ = Departement.objects.get_or_create(
-            code_dep='DEP_LBN_FR',
-            defaults={'lib_dep': 'Filières Francophones LBN', 'code_etab': etab, 'etablissement': etab}
-        )
-        dep_en, _ = Departement.objects.get_or_create(
-            code_dep='DEP_LBN_EN',
-            defaults={'lib_dep': 'Anglophone Studies LBN', 'code_etab': etab, 'etablissement': etab}
-        )
-
-        sp_col, _ = Specialite.objects.get_or_create(
-            code_sp='SP_LBN_COL',
-            defaults={'lib_sp': 'Collège Général', 'code_dep': dep_fr, 'etablissement': etab}
-        )
-        sp_a, _ = Specialite.objects.get_or_create(
-            code_sp='SP_LBN_A',
-            defaults={'lib_sp': 'Série A — Lettres et Sciences Humaines', 'code_dep': dep_fr, 'etablissement': etab}
-        )
-        sp_c, _ = Specialite.objects.get_or_create(
-            code_sp='SP_LBN_C',
-            defaults={'lib_sp': 'Série C — Mathématiques et Sciences Physiques', 'code_dep': dep_fr, 'etablissement': etab}
-        )
-        sp_d, _ = Specialite.objects.get_or_create(
-            code_sp='SP_LBN_D',
-            defaults={'lib_sp': 'Série D — Sciences Naturelles', 'code_dep': dep_fr, 'etablissement': etab}
-        )
-        sp_en, _ = Specialite.objects.get_or_create(
-            code_sp='SP_LBN_EN',
-            defaults={'lib_sp': 'Anglophone Stream', 'code_dep': dep_en, 'etablissement': etab}
-        )
-
-        # Niveaux collège
-        NIVEAUX_COL = [
-            ('6ème / Form 1', cyc1), ('5ème / Form 2', cyc1),
-            ('4ème / Form 3', cyc1), ('3ème / Form 4', cyc1),
-        ]
-        # Niveaux lycée
-        NIVEAUX_LYC = [
-            ('2nde', cyc2), ('1ère', cyc2), ('Terminale', cyc2),
-        ]
-        niveaux = {}
-        for lib, cyc in NIVEAUX_COL + NIVEAUX_LYC:
-            niv, _ = Niveau.objects.get_or_create(
-                lib_niveau=lib, code_cycle=cyc,
-                defaults={'code_pension': pension, 'code_annee_id': ANNEE_CODE, 'type_etab': 'SECONDAIRE'}
-            )
-            niveaux[lib] = niv
-
-        # Classes collège : 2 fr + 1 en par niveau → 12 classes collège
-        # Classes lycée  : A, C, D fr → 9 classes lycée
-        classes_lbn = []
-        col_short = {
-            '6ème / Form 1': '6eme',
-            '5ème / Form 2': '5eme',
-            '4ème / Form 3': '4eme',
-            '3ème / Form 4': '3eme',
-        }
-        for niv_lib in col_short:
-            niv = niveaux[niv_lib]
-            short = col_short[niv_lib]
-            for suf in ['A', 'B']:
-                cl, _ = Classe.objects.get_or_create(
-                    code_classe=f'LBN_{short}{suf}',
-                    defaults={
-                        'lib_classe': f'{niv_lib.split("/")[0].strip()} {suf}',
-                        'code_dep': dep_fr, 'code_niveau': niv,
-                        'code_sp': sp_col, 'eff_max': 55, 'etablissement': etab,
-                    }
-                )
-                classes_lbn.append(cl)
-            # Classe anglophone
-            cl_en, _ = Classe.objects.get_or_create(
-                code_classe=f'LBN_{short}EN',
-                defaults={
-                    'lib_classe': f'{niv_lib.split("/")[1].strip()}',
-                    'code_dep': dep_en, 'code_niveau': niv,
-                    'code_sp': sp_en, 'eff_max': 45, 'etablissement': etab,
-                }
-            )
-            classes_lbn.append(cl_en)
-
-        lyc_suf = {
-            '2nde': [('2ndeA', '2nde A', sp_a), ('2ndeC', '2nde C', sp_c), ('2ndeD', '2nde D', sp_d)],
-            '1ère': [('1ereA', '1ère A', sp_a), ('1ereC', '1ère C', sp_c), ('1ereD', '1ère D', sp_d)],
-            'Terminale': [('TleA', 'Terminale A', sp_a), ('TleC', 'Terminale C', sp_c), ('TleD', 'Terminale D', sp_d)],
-        }
-        for niv_lib, cls_def in lyc_suf.items():
-            niv = niveaux[niv_lib]
-            for code_suf, lib_classe, sp in cls_def:
-                cl, _ = Classe.objects.get_or_create(
-                    code_classe=f'LBN_{code_suf}',
-                    defaults={
-                        'lib_classe': lib_classe,
-                        'code_dep': dep_fr, 'code_niveau': niv,
-                        'code_sp': sp, 'eff_max': 50, 'etablissement': etab,
-                    }
-                )
-                classes_lbn.append(cl)
-
-        # 25 enseignants
-        ENS_LBN = [
-            ('LBN01', 'TSAPI',    'Alain',        'M', 'FONCTIONNAIRE'),
-            ('LBN02', 'NDJANA',   'Rose',          'F', 'FONCTIONNAIRE'),
-            ('LBN03', 'MBARGA',   'Clémentine',   'F', 'FONCTIONNAIRE'),
-            ('LBN04', 'TEKEU',    'Roland',        'M', 'FONCTIONNAIRE'),
-            ('LBN05', 'FOTSO',    'Jean',          'M', 'FONCTIONNAIRE'),
-            ('LBN06', 'NGUELE',   'Patricia',      'F', 'FONCTIONNAIRE'),
-            ('LBN07', 'BIYONG',   'Emmanuel',      'M', 'VACATAIRE'),
-            ('LBN08', 'KANA',     'Serge',         'M', 'FONCTIONNAIRE'),
-            ('LBN09', 'ABANDA',   'Christine',     'F', 'CONTRACTUEL'),
-            ('LBN10', 'NKOA',     'Bertrand',      'M', 'VACATAIRE'),
-            ('LBN11', 'OMGBA',    'Gilles',        'M', 'FONCTIONNAIRE'),
-            ('LBN12', 'EWANE',    'Nadège',        'F', 'FONCTIONNAIRE'),
-            ('LBN13', 'FOUDA',    'Martial',       'M', 'FONCTIONNAIRE'),
-            ('LBN14', 'MABOU',    'Flavie',        'F', 'VACATAIRE'),
-            ('LBN15', 'ZANGA',    'Nicolas',       'M', 'FONCTIONNAIRE'),
-            ('LBN16', 'AKOA',     'Josiane',       'F', 'CONTRACTUEL'),
-            ('LBN17', 'SAME',     'Boris',         'M', 'VACATAIRE'),
-            ('LBN18', 'DJOUFACK', 'Ornella',       'F', 'FONCTIONNAIRE'),
-            ('LBN19', 'DJOYA',    'Kevin',         'M', 'VACATAIRE'),
-            ('LBN20', 'BIKELE',   'Carole',        'F', 'CONTRACTUEL'),
-            ('LBN21', 'NKENGNE',  'Stéphane',     'M', 'FONCTIONNAIRE'),
-            ('LBN22', 'ETOUNDI',  'Viviane',       'F', 'FONCTIONNAIRE'),
-            ('LBN23', 'KUETE',    'Patrick',       'M', 'VACATAIRE'),
-            ('LBN24', 'WAMBA',    'Christelle',   'F', 'CONTRACTUEL'),
-            ('LBN25', 'AMOUGOU',  'Yannick',       'M', 'FONCTIONNAIRE'),
-        ]
-        ens_lbn = []
-        for mle, nom, prenom, sexe, statut in ENS_LBN:
-            ens, _ = Enseignant.objects.get_or_create(
-                mle_ens=mle,
-                defaults={
-                    'nom_ens': nom, 'prenom_ens': prenom, 'sexe': sexe,
-                    'statut': statut, 'tel_ens': _tel(),
-                    'code_dep': dep_fr, 'etablissement': etab,
-                }
-            )
-            ens_lbn.append(ens)
-
-        # Matières secondaires
-        mod_gen = Module.objects.get(code_module='GEN')
-        mod_sci = Module.objects.get(code_module='SCI')
-        mod_lit = Module.objects.get(code_module='LIT')
-        mod_spo = Module.objects.get(code_module='SPO')
-        MATIERES_SEC = [
-            ('SEC_FRA', 'Français',                    mod_lit),
-            ('SEC_ANG', 'Anglais',                     mod_lit),
-            ('SEC_MAT', 'Mathématiques',               mod_sci),
-            ('SEC_PCH', 'Physique-Chimie',             mod_sci),
-            ('SEC_SVT', 'Sciences de la Vie et Terre', mod_sci),
-            ('SEC_HGO', 'Histoire-Géographie',         mod_gen),
-            ('SEC_PHI', 'Philosophie',                 mod_lit),
-            ('SEC_ECM', 'Éducation à la Citoyenneté',  mod_gen),
-            ('SEC_EPS', 'Éducation Physique (EPS)',    mod_spo),
-            ('SEC_INF', 'Informatique',                mod_sci),
-        ]
-        matieres_sec = {}
-        for code, lib, mod in MATIERES_SEC:
-            m, _ = Matiere.objects.get_or_create(
-                code_matiere=code,
-                defaults={'lib_matiere': lib, 'code_module': mod, 'type_etab': 'SECONDAIRE'}
-            )
-            matieres_sec[code] = m
-
-        # Périodes (3 trimestres)
-        periodes_sec = []
-        for lib, deb, fin in [
-            ('Trimestre 1 SEC', date(2025, 10, 1),  date(2025, 12, 20)),
-            ('Trimestre 2 SEC', date(2026, 1, 5),   date(2026, 3, 27)),
-            ('Trimestre 3 SEC', date(2026, 4, 7),   date(2026, 6, 26)),
-        ]:
-            p, _ = Periode.objects.get_or_create(
-                lib_periode=lib,
-                defaults={'date_debut': deb, 'date_fin': fin, 'type_etab': 'SECONDAIRE', 'code_annee_id': ANNEE_CODE}
-            )
-            periodes_sec.append(p)
-
-        te_dv  = TypeEvaluation.objects.get(lib_type_eval='Devoir',       type_etab='SECONDAIRE')
-        te_cp  = TypeEvaluation.objects.get(lib_type_eval='Composition',  type_etab='SECONDAIRE')
-
-        mat_codes_eval = ['SEC_FRA', 'SEC_MAT', 'SEC_PCH', 'SEC_SVT', 'SEC_ANG']
-
-        nb_evals = 0
-        for i in range(200):
-            self.stdout.write(f'\r  Élèves LBN : {i+1}/200', ending='')
-            self.stdout.flush()
-            sexe    = 'M' if i % 2 == 0 else 'F'
-            nom     = _nom(i + 10)
-            prenom  = _prenom(i, sexe)
-            region  = _region(i + 3)
-            tuteur  = f'{_nom(i+7)} {_prenom(i+4, "M")}'
-            mle     = f'LB{i+1:04d}'
-            d_naiss = _date_naiss(2003, 2013)
-            cl      = classes_lbn[i % len(classes_lbn)]
-            ens_ref = ens_lbn[i % len(ens_lbn)]
-
-            etud = self._inscrire(mle, nom, prenom, sexe, d_naiss, region, tuteur, cl, etab, 5000)
-
-            sp_val = _statut_paiement()
-            Paiement.objects.get_or_create(
-                mle_etudiant=etud,
-                code_annee_id=ANNEE_CODE,
-                code_tranche=tr1,
-                defaults={
-                    'type_paiement':  'INSCRIPTION',
-                    'mt_paiement':    12500 if sp_val == 'PAYE' else (6000 if sp_val == 'PARTIEL' else 0),
-                    'statut':         sp_val,
-                    'date_paiement':  date(2025, 9, random.randint(1, 30)),
-                    'mode_paiement':  random.choice(['ESPECES', 'MOBILE_MONEY', 'VIREMENT']),
-                    'ref_paiement':   f'LBN{i+1:05d}',
-                    'etablissement':  etab,
-                }
-            )
-
-            for mat_code in mat_codes_eval:
-                mat_obj = matieres_sec[mat_code]
-                Cours.objects.get_or_create(
-                    code_matiere=mat_obj, code_classe=cl,
-                    semestre='S1', code_annee_id=ANNEE_CODE,
-                    defaults={'mle_ens': ens_ref, 'quota_horaire': 40, 'credits': 0, 'etablissement': etab}
-                )
-                for per in periodes_sec[:2]:
-                    for te in [te_dv, te_cp]:
-                        Evaluation.objects.get_or_create(
-                            mle_etudiant=etud,
-                            code_matiere=mat_obj,
-                            code_classe=cl,
-                            code_periode=per,
-                            code_type_eval=te,
-                            defaults={
-                                'note':      round(random.uniform(4, 20), 2),
-                                'date_eval': per.date_debut + timedelta(days=random.randint(5, 45)),
-                                'etablissement': etab,
-                            }
-                        )
-                        nb_evals += 1
-
-        self.stdout.write('')
-
-        first_lb = Etudiant.objects.get(mle_etudiant='LB0001')
-        for login, nom, role in [
-            ('lbn_admin', 'ZANGA Théodore — Proviseur LBN',  'ADMIN'),
-            ('lbn_scol',  'NDJANA Rose — Scolarité LBN',     'SCOLARITE'),
-            ('lbn_ens',   'TSAPI Alain — Enseignant LBN',    'ENSEIGNANT'),
-            ('lbn_compt', 'FOUDA Martial — Comptable LBN',   'COMPTABLE'),
-            ('lbn_etud',  f'{first_lb.nom} {first_lb.prenom or ""}', 'ETUDIANT'),
-        ]:
-            self._user(login, nom, role, CODE)
-
-        # ── Personnel LBN ──────────────────────────────────────────────────────
-        PERS_LBN = [
-            ('LBN_PRV01', 'ZANGA',    'Théodore',   'M', 'PROVISEUR',      'DIRECTION',   'TITULAIRE'),
-            ('LBN_PRV02', 'NKOA',     'Bernadette',  'F', 'PROVISEUR_ADJ',  'DIRECTION',   'TITULAIRE'),
-            ('LBN_PED01', 'MBARGA',   'Cyrille',    'M', 'CENSEUR',        'PEDAGOGIQUE', 'TITULAIRE'),
-            ('LBN_PED02', 'ONDOA',    'Félicité',   'F', 'CENSEUR_ADJ',    'PEDAGOGIQUE', 'TITULAIRE'),
-            ('LBN_ADM01', 'ETOA',     'Samuel',     'M', 'SG',             'ADMIN',       'TITULAIRE'),
-            ('LBN_ADM02', 'NGONO',    'Patricia',   'F', 'DAC',            'ADMIN',       'TITULAIRE'),
-            ('LBN_ADM03', 'ABANDA',   'Henri',      'M', 'INTENDANT',      'ADMIN',       'CONTRACTUEL'),
-            ('LBN_PED03', 'BIYONG',   'Lucie',      'F', 'CONSEILLER_ORI', 'PEDAGOGIQUE', 'TITULAIRE'),
-            ('LBN_ADM04', 'MANGA',    'Jean',       'M', 'AGENT_SCOL',     'ADMIN',       'CONTRACTUEL'),
-            ('LBN_ADM05', 'ESSAMA',   'Martine',    'F', 'AGENT_SCOL',     'ADMIN',       'CONTRACTUEL'),
-            ('LBN_PED04', 'ATEBA',    'Clément',    'M', 'SURVEILLANT',    'PEDAGOGIQUE', 'CONTRACTUEL'),
-            ('LBN_SOU01', 'FOUDA',    'Rodrigue',   'M', 'GARDIEN',        'SOUTIEN',     'CONTRACTUEL'),
-            ('LBN_SOU02', 'EYEBE',    'Claudine',   'F', 'GARDIEN',        'SOUTIEN',     'CONTRACTUEL'),
-            ('LBN_SOU03', 'NDJANA',   'Sylvie',     'F', 'ENTRETIEN',      'SOUTIEN',     'BENEVOLE'),
-            ('LBN_SOU04', 'ENGOLO',   'Marthe',     'F', 'ENTRETIEN',      'SOUTIEN',     'BENEVOLE'),
-            ('LBN_SOU05', 'ZANG',     'Annette',    'F', 'ENTRETIEN',      'SOUTIEN',     'BENEVOLE'),
-        ]
-        nb_pers = self._seed_personnel(etab, PERS_LBN)
-        self.stdout.write(f'  [OK] LBN termine - 200 eleves, 25 enseignants, {nb_pers} personnel')
-        return {'eleves': 200, 'ens': len(ENS_LBN), 'evals': nb_evals}
 
     # ────────────────────────────────────────────────────────────────────────────
     # ISTA — Institut Supérieur de Technologies Appliquées

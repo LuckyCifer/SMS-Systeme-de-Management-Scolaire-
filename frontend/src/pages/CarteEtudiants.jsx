@@ -27,7 +27,8 @@ function Form({ item, onClose, onSave }) {
     qr_code_data: item?.qr_code_data || '',
   });
   useEffect(() => {
-    api.get('/api/etudiants/?page_size=200').then(r => setEts(r.data.results ?? r.data)).finally(() => setLoad(false));
+    // Tous les élèves de l'école (le serveur plafonne à 5000), choisis par saisie dans la liste.
+    api.get('/api/etudiants/?page_size=5000').then(r => setEts(r.data.results ?? r.data)).finally(() => setLoad(false));
   }, []);
   useEffect(() => {
     if (f.mle_etudiant && f.code_annee) {
@@ -47,13 +48,8 @@ function Form({ item, onClose, onSave }) {
   return (
     <form onSubmit={e => { e.preventDefault(); onSave(f); }}>
       <div className="sms-form-row">
-        <div className="sms-form-group">
-          <label className="sms-label">{labels.studentLabel} *</label>
-          <select className="sms-input" name="mle_etudiant" value={f.mle_etudiant} onChange={ch} required>
-            <option value="">{t.common.select}</option>
-            {etudiants.map(e => <option key={e.mle_etudiant} value={e.mle_etudiant}>{e.nom} {e.prenom||''} ({e.mle_etudiant})</option>)}
-          </select>
-        </div>
+        <FormField label={labels.studentLabel} name="mle_etudiant" type="searchable" value={f.mle_etudiant} onChange={ch} required
+          options={etudiants.map(e => ({ value: e.mle_etudiant, label: `${e.nom} ${e.prenom || ''} (${e.mle_etudiant})` }))} />
         <FormField label={`${t.fields.annee} *`} name="code_annee" value={f.code_annee} onChange={ch} required placeholder="2025-2026" />
       </div>
       <div className="sms-form-row">

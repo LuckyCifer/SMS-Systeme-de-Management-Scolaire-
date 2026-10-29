@@ -308,7 +308,7 @@ function Form({ item, onClose, onSave, labels }) {
 
 // ── Page principale ───────────────────────────────────────────────────────────
 export default function Students() {
-  const { t, toast, lang } = useApp();
+  const { t, toast, lang, anneeActive } = useApp();
   const { showPreview } = usePdfPreview();
   const { typeEtab, systeme } = useEtablissement();
   const labels = etabLabels(typeEtab, systeme, lang);
@@ -429,10 +429,11 @@ export default function Students() {
           e.stopPropagation();
           setCertLoading(r.mle_etudiant);
           try {
-            // Récupère la dernière inscription de l'étudiant
-            const res = await api.get(`/api/etudiants/${r.mle_etudiant}/inscriptions/?page_size=1`);
-            const inscList = res.data.results ?? res.data ?? [];
-            const insc = inscList[inscList.length - 1] || {};
+            // Inscription de l'année affichée dans le bandeau, sinon la plus récente.
+            const res = await api.get(`/api/etudiants/${r.mle_etudiant}/inscriptions/`);
+            const inscList = [...(res.data.results ?? res.data ?? [])]
+              .sort((a, b) => String(b.code_annee).localeCompare(String(a.code_annee)));
+            const insc = inscList.find(i => i.code_annee === anneeActive?.code_annee) || inscList[0] || {};
             const etabRaw = localStorage.getItem('sms_etab');
             const etab = etabRaw ? JSON.parse(etabRaw)?.data : null;
             const userRaw = localStorage.getItem('sms_user');
@@ -458,7 +459,7 @@ export default function Students() {
       </button>
     )},
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [t, certLoading, labels]);
+  ], [t, certLoading, labels, anneeActive]);
 
   const handleBulkDelete = async (ids) => {
     await api.post('/api/etudiants/bulk-delete/', { ids });

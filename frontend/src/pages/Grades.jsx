@@ -206,6 +206,8 @@ export default function Grades() {
       const { blob, filename } = await generateBulletin(
         { ...etud, mle_etudiant: r.mle_etudiant, lib_classe: classe?.lib_classe || '' },
         r, periodeLabel, etab,
+        // Secondaire : bulletin au format officiel (classe et période nécessaires).
+        { code_classe: classeId, ...(choix || {}) },
       );
       showPreview(blob, filename);
       toast.success(t.toast.exported);

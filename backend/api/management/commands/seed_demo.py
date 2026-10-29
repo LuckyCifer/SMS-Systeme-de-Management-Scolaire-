@@ -2,8 +2,9 @@
 seed_demo.py — Données de démonstration SMS
 Soutenance Licence Génie Logiciel — août 2026
 
-Crée 3 établissements complets (Primaire / Secondaire / Supérieur)
-avec structures académiques, étudiants et comptes utilisateurs.
+Crée 2 établissements complets (Primaire / Supérieur) avec structures académiques,
+étudiants et comptes utilisateurs. Le lycée de démonstration (LBNK, Nkolbisson) a été
+retiré le 26/10/2026.
 
 Idempotent : relançable sans risque (get_or_create / update_or_create).
 
@@ -67,22 +68,20 @@ ELEVES_SUPERIEUR = [
 
 
 class Command(BaseCommand):
-    help = 'Peuple la base avec des données de démonstration (3 établissements)'
+    help = 'Peuple la base avec des données de démonstration (2 établissements)'
 
     def handle(self, *args, **options):
         with transaction.atomic():
             self._annee()
             self._seed_epbba()
-            self._seed_lbnk()
             self._seed_islt()
             self._super_admin()
 
         self.stdout.write(self.style.SUCCESS(
-            '\n✓ seed_demo terminé — 3 établissements + SUPER_ADMIN prêts.\n'
+            '\n✓ seed_demo terminé — 2 établissements + SUPER_ADMIN prêts.\n'
             '\n  Mot de passe commun : Demo2026!\n'
             '\n  SUPER_ADMIN  → lucky_admin\n'
             '  PRIMAIRE     → epbba_admin / epbba_ens / epbba_etud\n'
-            '  SECONDAIRE   → lbnk_admin  / lbnk_ens  / lbnk_etud\n'
             '  SUPERIEUR    → islt_admin  / islt_ens  / islt_etud\n'
         ))
 
@@ -222,98 +221,6 @@ class Command(BaseCommand):
         self._user('epbba_ens',   'Atangana Marie-Claire',   'ENSEIGNANT', CODE)
         self._user('epbba_etud',  'Mbarga Jean-Pierre',      'ETUDIANT',   CODE)
         self.stdout.write(f'  ✓ {CODE} — École Primaire Bilingue de Biyem-Assi')
-
-    # ── LBNK ── Lycée Bilingue de Nkolbisson ─────────────────────────────────
-
-    def _seed_lbnk(self):
-        CODE = 'LBNK'
-        etab, _ = Etablissement.objects.get_or_create(
-            code_etab=CODE,
-            defaults={
-                'lib_etab':  'Lycée Bilingue de Nkolbisson',
-                'sigle':     CODE,
-                'type_etab': 'SECONDAIRE',
-                'statut':    'PUBLIC',
-                'systeme':   'BILINGUE',
-                'region':    'CENTRE',
-                'ville':     'Yaoundé',
-                'adresse':   'Nkolbisson, Route de Bafoussam, Yaoundé',
-                'telephone': '+237 222 32 44 55',
-                'directeur': 'Mme Fouda Cécile-Marie',
-            }
-        )
-
-        pension, _ = Pension.objects.get_or_create(
-            lib_pension='Scolarité Secondaire LBNK',
-            defaults={
-                'mt_pension': 75000, 'mt_inscription': 10000,
-                'nb_tranche': 3, 'type_etab': 'SECONDAIRE',
-            }
-        )
-        for i, mt in enumerate([35000, 25000, 15000], start=1):
-            Tranche.objects.get_or_create(
-                lib_tranche=f'T{i}', code_pension=pension,
-                defaults={'mt_tranche': mt}
-            )
-
-        cycle, _ = Cycle.objects.get_or_create(
-            code_cycle='CYC_SEC',
-            defaults={'lib_cycle': 'Cycle Secondaire', 'code_pension': pension, 'type_etab': 'SECONDAIRE'}
-        )
-
-        niv_6eme, _ = Niveau.objects.get_or_create(
-            lib_niveau='Sixième (6ème)', code_cycle=cycle,
-            defaults={'code_pension': pension, 'code_annee_id': ANNEE_CODE, 'type_etab': 'SECONDAIRE'}
-        )
-        niv_3eme, _ = Niveau.objects.get_or_create(
-            lib_niveau='Troisième (3ème)', code_cycle=cycle,
-            defaults={'code_pension': pension, 'code_annee_id': ANNEE_CODE, 'type_etab': 'SECONDAIRE'}
-        )
-
-        dep, _ = Departement.objects.get_or_create(
-            code_dep='DEP_LBNK',
-            defaults={'lib_dep': 'Enseignement Secondaire', 'code_etab': etab, 'etablissement': etab}
-        )
-        sp, _ = Specialite.objects.get_or_create(
-            code_sp='SP_LBNK',
-            defaults={'lib_sp': 'Formation Générale Secondaire', 'code_dep': dep, 'etablissement': etab}
-        )
-
-        cl_6a, _ = Classe.objects.get_or_create(
-            code_classe='LBNK_6A',
-            defaults={
-                'lib_classe': '6ème A', 'code_dep': dep,
-                'code_niveau': niv_6eme, 'code_sp': sp,
-                'eff_max': 50, 'etablissement': etab,
-            }
-        )
-        cl_3b, _ = Classe.objects.get_or_create(
-            code_classe='LBNK_3B',
-            defaults={
-                'lib_classe': '3ème B', 'code_dep': dep,
-                'code_niveau': niv_3eme, 'code_sp': sp,
-                'eff_max': 50, 'etablissement': etab,
-            }
-        )
-
-        Enseignant.objects.get_or_create(
-            mle_ens='ENS_SEC01',
-            defaults={
-                'nom_ens': 'Fouda', 'prenom_ens': 'Bertrand-Alain',
-                'sexe': 'M', 'statut': 'FONCTIONNAIRE',
-                'tel_ens': '+237 699 55 66 77',
-                'code_dep': dep, 'etablissement': etab,
-            }
-        )
-
-        classes_map = [cl_6a] * 5 + [cl_3b] * 5
-        for (mle, nom, prenom, sexe), classe in zip(ELEVES_SECONDAIRE, classes_map):
-            self._inscrire(mle, nom, prenom, sexe, classe, etab)
-
-        self._user('lbnk_admin', 'Administrateur LBNK',   'ADMIN',      CODE)
-        self._user('lbnk_ens',   'Fouda Bertrand-Alain',   'ENSEIGNANT', CODE)
-        self._user('lbnk_etud',  'Abanda Nicolas',         'ETUDIANT',   CODE)
-        self.stdout.write(f'  ✓ {CODE} — Lycée Bilingue de Nkolbisson')
 
     # ── ISLT ── Institut Supérieur LuckyTech ─────────────────────────────────
 

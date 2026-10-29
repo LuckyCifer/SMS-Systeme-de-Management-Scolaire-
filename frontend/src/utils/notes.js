@@ -15,16 +15,26 @@ export const APPRECIATION_BADGE = { A: 'badge-success', ECA: 'badge-warning', NA
 const SERIES_LANGUES = ['ALLEMAND', 'ESPAGNOL', 'LATIN', 'CHINOIS'];
 const SERIES_FR = ['A', 'C', 'D', 'E', 'TI'];
 const SERIES_EN = ['ARTS', 'SCIENCE'];
+// Enseignement technique : spécialité du CAP (1ère à 4ème année), série du bac technique.
+const SERIES_TECH_CAP = ['ELEC', 'ELN', 'MACO', 'IS', 'FC', 'MEB'];
+const SERIES_TECH_BAC = ['F2', 'F3', 'F4', 'F5', 'IS', 'IB', 'MEB'];
 export const SERIES_PAR_NIVEAU = {
   '4EME_FR': SERIES_LANGUES, '3EME_FR': SERIES_LANGUES,
   '2NDE_FR': SERIES_FR, '1ERE_FR': SERIES_FR, 'TLE_FR': SERIES_FR,
   'LS_EN': SERIES_EN, 'US_EN': SERIES_EN,
+  '1AN_TECH': SERIES_TECH_CAP, '2AN_TECH': SERIES_TECH_CAP, '3AN_TECH': SERIES_TECH_CAP, '4AN_TECH': SERIES_TECH_CAP,
+  '2NDE_TECH': SERIES_TECH_BAC, '1ERE_TECH': SERIES_TECH_BAC, 'TLE_TECH': SERIES_TECH_BAC,
 };
 const LIBELLES_SERIE = {
   ALLEMAND: ['Allemand', 'German'], ESPAGNOL: ['Espagnol', 'Spanish'], LATIN: ['Latin', 'Latin'],
   CHINOIS: ['Chinois', 'Chinese'], A: ['Série A', 'Series A'], C: ['Série C', 'Series C'],
   D: ['Série D', 'Series D'], E: ['Série E', 'Series E'], TI: ['Série TI', 'Series TI'],
   ARTS: ['Arts', 'Arts'], SCIENCE: ['Science', 'Science'],
+  ELEC: ['Électricité', 'Electricity'], ELN: ['Électronique', 'Electronics'], MACO: ['Maçonnerie', 'Masonry'],
+  FC: ['Froid et climatisation', 'Refrigeration & air conditioning'], IS: ['Installation sanitaire', 'Plumbing'],
+  MEB: ['Menuiserie-ébénisterie', 'Joinery & cabinet-making'], F2: ['F2 — Électronique', 'F2 — Electronics'],
+  F3: ['F3 — Électrotechnique', 'F3 — Electrical engineering'], F4: ['F4 — Génie civil', 'F4 — Civil engineering'],
+  F5: ['F5 — Froid et climatisation', 'F5 — Refrigeration & air conditioning'], IB: ['Industrie du bois', 'Wood industry'],
 };
 // LIB_SERIE[code] donne le libellé dans la langue courante (accesseurs évalués à la lecture).
 export const LIB_SERIE = Object.defineProperties({}, Object.fromEntries(

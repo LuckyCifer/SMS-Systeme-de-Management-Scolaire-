@@ -124,7 +124,7 @@ function Form({ item, onClose, onSave, labels }) {
 
   useEffect(() => {
     Promise.all([
-      api.get('/api/etudiants/?page_size=200'),
+      api.get('/api/etudiants/?page_size=5000'),   // tous les élèves de l'école
       api.get('/api/classes/?page_size=100'),
       api.get('/api/annees/?page_size=20'),
     ]).then(([e, c, a]) => {

@@ -622,10 +622,16 @@ class NiveauViewSet(EtablissementFilterMixin, SMSBaseViewSet):
 
 class ClasseViewSet(EtablissementFilterMixin, SMSBaseViewSet):
     queryset         = Classe.objects.select_related(
-        'code_dep', 'code_niveau', 'code_bat', 'code_salle', 'code_sp').all()
+        'code_dep', 'code_niveau__code_cycle', 'code_bat', 'code_salle', 'code_sp').all()
     serializer_class = ClasseSerializer
     search_fields    = ['lib_classe', 'code_classe']
     filterset_fields = ['code_dep', 'code_sp', 'code_niveau']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        # Supérieur : classes d'un cycle (formulaire d'inscription).
+        code_cycle = self.request.query_params.get('code_cycle')
+        return qs.filter(code_niveau__code_cycle=code_cycle) if code_cycle else qs
 
     @action(detail=True, methods=['get'], url_path='export-csv')
     def export_csv(self, request, pk=None):
@@ -1367,10 +1373,11 @@ class FraisViewSet(EtablissementFilterMixin, SMSBaseViewSet):
 class InscriptionViewSet(EtablissementFilterMixin, SMSBaseViewSet):
     etudiant_lookup = 'mle_etudiant'
     queryset         = Inscription.objects.select_related(
-        'code_classe__code_niveau', 'mle_etudiant', 'code_annee').all()
+        'code_classe__code_niveau', 'mle_etudiant', 'code_annee', 'code_cycle').order_by('-code_inscription')
     serializer_class = InscriptionSerializer
-    search_fields    = ['mle_etudiant__nom', 'mle_etudiant__prenom']
-    filterset_fields = ['code_classe', 'code_annee']
+    search_fields    = ['mle_etudiant__nom', 'mle_etudiant__prenom', 'mle_etudiant__mle_etudiant',
+                        'code_classe__lib_classe', 'code_cycle__lib_cycle', 'code_annee__lib_annee']
+    filterset_fields = ['code_classe', 'code_annee', 'code_cycle']
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -1595,9 +1602,11 @@ class QualificationViewSet(EtablissementParRelationMixin, SMSBaseViewSet):
     filterset_fields = ['mle_ens', 'code_matiere']
 
 class CoursViewSet(EtablissementFilterMixin, SMSBaseViewSet):
-    queryset         = Cours.objects.select_related('code_matiere', 'code_classe', 'mle_ens', 'code_annee').all()
+    queryset         = Cours.objects.select_related('code_matiere', 'code_classe', 'mle_ens', 'code_annee')                             .order_by('code_classe__lib_classe', 'code_matiere__lib_matiere', 'id')
     serializer_class = CoursSerializer
     filterset_fields = ['code_classe', 'code_matiere', 'mle_ens', 'semestre', 'code_annee']
+    search_fields    = ['code_matiere__lib_matiere', 'code_matiere__code_matiere', 'code_classe__lib_classe',
+                        'mle_ens__nom_ens', 'mle_ens__prenom_ens', 'semestre', 'code_annee__lib_annee']
 
     def get_queryset(self):
         qs = super().get_queryset()

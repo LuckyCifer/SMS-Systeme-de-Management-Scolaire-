@@ -5,7 +5,7 @@ secondaire, bilan annuel, appréciations A/ECA/NA du primaire, délibération pa
 """
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.models import User
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from rest_framework.test import APIClient
 
 from api.deduction_classes import deduire_niveau_serie
@@ -584,3 +584,26 @@ class CircuitFicheTest(NotesTestBase):
         self.saisir(self.ens_client, [{'mle_etudiant': 'A', 'note': 16}])
         self.client.post(f'/api/fiches-notes/{self.fiche.pk}/valider/')
         self.assertEqual(float(Evaluation.objects.get(mle_etudiant='A', code_matiere='MATHS').note), 16.0)
+
+
+class BulletinSecondaireTest(SimpleTestCase):
+    """Rang par matière, profil de la classe et appréciations du bulletin (notes.classer)."""
+
+    def test_rang_matiere_profil_et_appreciations(self):
+        from api.notes import appreciation_bulletin, classer
+
+        def eleve(nom, moy_gen, moy_math):
+            return {'nom_etudiant': nom, 'moyenne_generale': moy_gen,
+                    'matieres': [{'code_matiere': 'MATH', 'moyenne': moy_math}]}
+        resultats = [eleve('A', 12.0, 15.0), eleve('B', 8.0, 15.0), eleve('C', 14.0, 9.5), eleve('D', None, None)]
+        classer(resultats)
+        par_nom = {r['nom_etudiant']: r for r in resultats}
+        # Ex aequo en mathématiques : 1er, 1er, puis 3e ; sans moyenne : pas de rang.
+        self.assertEqual([par_nom[n]['matieres'][0]['rang'] for n in 'ABCD'], [1, 1, 3, None])
+        self.assertEqual(par_nom['A']['matieres'][0]['moyenne_classe_matiere'], 13.17)
+        self.assertEqual(par_nom['A']['matieres'][0]['appreciation_bulletin'], 'Bien')
+        self.assertEqual((par_nom['A']['moyenne_max'], par_nom['A']['moyenne_min']), (14.0, 8.0))
+        self.assertEqual(par_nom['A']['taux_reussite'], 66.7)
+        self.assertEqual(par_nom['B']['appreciation_travail'], 'Insuffisant')  # 8 : de 8 à 10
+        self.assertEqual([appreciation_bulletin(n) for n in (19, 16, 10, 4.5, None)],
+                         ['Excellent', 'Très bien', 'Passable', 'Très faible', None])

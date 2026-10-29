@@ -144,6 +144,8 @@ class ClasseSerializer(serializers.ModelSerializer):
     lib_bat          = serializers.CharField(source='code_bat.lib_bat',           read_only=True)
     lib_salle        = serializers.CharField(source='code_salle.lib_salle',       read_only=True)
     lib_niv_scolaire = serializers.CharField(source='niveau_scolaire.lib_niveau', read_only=True)
+    code_cycle       = serializers.CharField(source='code_niveau.code_cycle_id',  read_only=True, default=None)
+    lib_cycle        = serializers.CharField(source='code_niveau.code_cycle.lib_cycle', read_only=True, default=None)
     class Meta:
         model = Classe
         fields = '__all__'
@@ -415,6 +417,7 @@ class InscriptionSerializer(serializers.ModelSerializer):
     lib_classe          = serializers.CharField(source='code_classe.lib_classe',                     read_only=True)
     lib_annee           = serializers.CharField(source='code_annee.lib_annee',                       read_only=True)
     lib_niv_scolaire    = serializers.CharField(source='code_classe.code_niveau.lib_niveau',         read_only=True)
+    lib_cycle           = serializers.CharField(source='code_cycle.lib_cycle',                       read_only=True)
     statut_paiement     = serializers.SerializerMethodField()
     mt_paye_inscription = serializers.SerializerMethodField()
 
@@ -441,6 +444,29 @@ class InscriptionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Inscription
         fields = '__all__'
+
+    def validate(self, data):
+        # Supérieur : le cycle (BTS, Licence, Master…) est choisi à l'inscription. Il doit
+        # appartenir à l'école et correspondre à la classe ; sans choix, il est déduit de la
+        # classe. Le primaire et le secondaire n'en ont pas.
+        from .mixins import trusted_etablissement_header, type_etab_courant
+        request = self.context['request']
+        get = lambda field: data.get(field, getattr(self.instance, field, None))
+        classe, cycle = get('code_classe'), get('code_cycle')
+        if type_etab_courant(request) != 'SUPERIEUR':
+            data['code_cycle'] = None
+            return data
+        cycle_classe = classe.code_niveau.code_cycle if classe and classe.code_niveau_id else None
+        if cycle and cycle.etablissement_id and cycle.etablissement_id != trusted_etablissement_header(request):
+            raise serializers.ValidationError({'code_cycle': "Ce cycle n'appartient pas à l'établissement."})
+        if cycle and cycle_classe and cycle.pk != cycle_classe.pk:
+            raise serializers.ValidationError({'code_classe':
+                f"La classe {classe.lib_classe} appartient au cycle {cycle_classe.lib_cycle}, pas au cycle {cycle.lib_cycle}."})
+        if not cycle:
+            if not cycle_classe:
+                raise serializers.ValidationError({'code_cycle': 'Choisissez le cycle (BTS, Licence, Master…).'})
+            data['code_cycle'] = cycle_classe
+        return data
 
 class FraisInscriptionSerializer(serializers.ModelSerializer):
     lib_frais = serializers.CharField(source='code_frais.lib_frais', read_only=True)
@@ -852,6 +878,7 @@ class AbsenceSerializer(serializers.ModelSerializer):
     nom_etudiant = serializers.CharField(source='mle_etudiant.nom', read_only=True)
     lib_matiere  = serializers.CharField(source='code_seance.code_matiere.lib_matiere', read_only=True)
     date_seance  = serializers.DateField(source='code_seance.date_seance', read_only=True)
+    nb_heures    = serializers.FloatField(source='code_seance.nb_heures_effectuees', read_only=True, default=None)
     class Meta:
         model = Absence
         fields = '__all__'

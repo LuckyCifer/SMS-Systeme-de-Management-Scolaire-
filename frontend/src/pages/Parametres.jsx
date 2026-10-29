@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
+import { useTr } from '../hooks/useTr';
 import { useApi, useMutation } from '../hooks/useApi';
 import { FormField } from '../components/CrudTable';
 import { LoadingState, ErrorState } from '../components/ApiState';
@@ -43,7 +44,7 @@ const TYPE_COLORS = {
 };
 
 const EMPTY_ETAB = {
-  code_etab: '', lib_etab: '', sigle: '', type_etab: 'SUPERIEUR',
+  code_etab: '', lib_etab: '', sigle: '', devise: '', type_etab: 'SUPERIEUR',
   statut: 'PRIVE_LAIQUE', systeme: 'FRANCOPHONE',
   region: '', ville: '', adresse: '',
   telephone: '', email: '', site_web: '',
@@ -325,6 +326,7 @@ function EtabList({ onAdd, onEdit, onReload }) {
 // ── Formulaire établissement ───────────────────────────────────────────────────
 function EtabForm({ item, onCancel, onSaved }) {
   const { t, toast } = useApp();
+  const tr = useTr();
   const tp = t.pages.parametres;
   const isEdit = Boolean(item);
 
@@ -332,6 +334,7 @@ function EtabForm({ item, onCancel, onSaved }) {
     code_etab:           item.code_etab            || '',
     lib_etab:            item.lib_etab             || '',
     sigle:               item.sigle                || '',
+    devise:              item.devise               || '',
     type_etab:           item.type_etab            || 'SUPERIEUR',
     statut:              item.statut               || 'PRIVE_LAIQUE',
     systeme:             item.systeme              || 'FRANCOPHONE',
@@ -510,6 +513,10 @@ function EtabForm({ item, onCancel, onSaved }) {
           {!isEdit && (
             <FormField label={tp.sigle} name="sigle" value={f.sigle} onChange={ch} />
           )}
+          <FormField label={tr('Devise', 'Motto')} name="devise" value={f.devise} onChange={ch}
+            placeholder={tr('Ex : Discipline – Travail – Réussite', 'E.g. Hope – Integrity – Excellence')}
+            help={tr("Imprimée sous le nom de l'école sur les certificats et les documents PDF.",
+                     "Printed under the school's name on certificates and PDF documents.")} />
           <div className="sms-form-row">
             <FormField label={tp.typeEtab} name="type_etab" type="select" value={f.type_etab} onChange={ch} options={TYPE_OPTIONS} />
             <FormField label={tp.statut}   name="statut"    type="select" value={f.statut}    onChange={ch} options={STATUT_OPTIONS} />

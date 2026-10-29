@@ -165,6 +165,11 @@ class Command(BaseCommand):
             code_dep='DEP_MBOUDA',
             defaults={'lib_dep': 'Enseignement Secondaire Général', 'etablissement': etab},
         )
+        # Seconde section du lycée, proposée dans la fiche élève (« Série / Section »).
+        Departement.objects.get_or_create(
+            code_dep='DEP_MBDTEC',
+            defaults={'lib_dep': 'Enseignement Général Technique', 'etablissement': etab},
+        )
         return dep
 
     def _classes(self, etab, dep):

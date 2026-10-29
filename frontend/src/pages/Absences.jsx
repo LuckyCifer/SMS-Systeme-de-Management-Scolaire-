@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import api from '../services/api';
 import { useApp } from '../context/AppContext';
 import { LoadingState } from '../components/ApiState';
+import SearchableSelect from '../components/SearchableSelect';
 import { useEtablissement } from '../hooks/useEtablissement';
 import { etabLabels } from '../utils/etabLabels';
 
@@ -45,15 +46,14 @@ export default function Absences() {
 
   // Charger les classes au montage
   useEffect(() => {
-    api.get('/api/classes/?page_size=200')
+    api.get('/api/classes/?page_size=1000')
       .then(res => setClasses(res.data.results ?? res.data));
   }, []);
 
-  // Charger les étudiants quand une classe est sélectionnée
+  // Étudiants de la classe choisie, ou de toute l'école si aucune classe n'est choisie.
   useEffect(() => {
-    if (!selectedClasse) { setEtudiants([]); return; }
     setLoadingEtu(true);
-    api.get(`/api/etudiants/?code_classe=${selectedClasse}&page_size=500`)
+    api.get('/api/etudiants/', { params: { page_size: 5000, ...(selectedClasse ? { code_classe: selectedClasse } : {}) } })
       .then(res => setEtudiants(res.data.results ?? res.data))
       .finally(() => setLoadingEtu(false));
   }, [selectedClasse]);
@@ -130,37 +130,33 @@ export default function Absences() {
       <div className="sms-card" style={{ padding: '14px 18px', marginBottom: 16 }}>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
           <div style={{ flex: '1 1 220px' }}>
-            <label className="sms-label">{t.fields.classe}</label>
-            <select className="sms-input" value={selectedClasse}
-              onChange={e => { setSelectedClasse(e.target.value); setSelectedEtu(''); }}>
-              <option value="">{t.common.allClasses}</option>
-              {classes.map(c => (
-                <option key={c.code_classe} value={c.code_classe}>{c.lib_classe}</option>
-              ))}
-            </select>
+            {/* Listes avec saisie : on tape une partie du nom pour filtrer. */}
+            <SearchableSelect label={t.fields.classe} name="classe" value={selectedClasse}
+              onChange={e => { setSelectedClasse(e.target.value); setSelectedEtu(''); }}
+              placeholder={t.common.allClasses}
+              options={classes.map(c => ({ value: c.code_classe, label: c.lib_classe || c.code_classe }))} />
           </div>
           <div style={{ flex: '1 1 280px' }}>
-            <label className="sms-label">{labels.studentLabelPlural} *</label>
             {loadingEtu ? (
-              <div className="sms-input" style={{ color: 'var(--text-muted)' }}>{t.common.loading}</div>
+              <div className="sms-form-group">
+                <label className="sms-label">{labels.studentLabelPlural} *</label>
+                <div className="sms-input" style={{ color: 'var(--text-muted)' }}>{t.common.loading}</div>
+              </div>
             ) : (
-              <select className="sms-input" value={selectedEtu} onChange={e => setSelectedEtu(e.target.value)}>
-                <option value="">{t.common.select}</option>
-                {etudiantsFiltres.map(e => (
-                  <option key={e.mle_etudiant} value={e.mle_etudiant}>
-                    {e.nom} {e.prenom || ''} — {e.mle_etudiant}
-                  </option>
-                ))}
-              </select>
+              <SearchableSelect label={labels.studentLabelPlural} name="etudiant" value={selectedEtu} required
+                onChange={e => setSelectedEtu(e.target.value)}
+                options={etudiantsFiltres.map(e => ({ value: e.mle_etudiant, label: `${e.nom} ${e.prenom || ''} — ${e.mle_etudiant}` }))} />
             )}
           </div>
           <div style={{ flex: '0 1 180px' }}>
-            <label className="sms-label">{t.pages.absences.filterType}</label>
-            <select className="sms-input" value={filterPresent} onChange={e => setFilter(e.target.value)}>
-              <option value="all">{t.common.all}</option>
-              <option value="false">{t.pages.absences.absOnly}</option>
-              <option value="true">{t.pages.absences.presOnly}</option>
-            </select>
+            <div className="sms-form-group">
+              <label className="sms-label">{t.pages.absences.filterType}</label>
+              <select className="sms-input" value={filterPresent} onChange={e => setFilter(e.target.value)}>
+                <option value="all">{t.common.all}</option>
+                <option value="false">{t.pages.absences.absOnly}</option>
+                <option value="true">{t.pages.absences.presOnly}</option>
+              </select>
+            </div>
           </div>
         </div>
       </div>
