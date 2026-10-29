@@ -172,6 +172,13 @@ const generateBulletinSecondaire = async (etudiant, resultat, etabData, ctx) => 
     api.get('/api/evaluations/moyennes/', { params: { code_classe: ctx.code_classe, code_periode: c.code_periode, mle_etudiant: mle } })
       .then(r => Object.fromEntries((r.data?.[0]?.matieres || []).map(m => [m.code_matiere, m.moyenne])))
       .catch(() => ({}))));
+  // Coefficients de la grille (niveau et série de la classe) : affichés aussi pour les
+  // matières encore sans note.
+  const coefsGrille = (codeAnnee && classe?.niveau_scolaire)
+    ? await api.get('/api/coefficients/', { params: { code_annee: codeAnnee, niveau_scolaire: classe.niveau_scolaire,
+        serie: classe.serie || '', page_size: 500 } })
+      .then(r => Object.fromEntries(liste(r).map(c => [c.code_matiere?.code_matiere || c.code_matiere, c.coef]))).catch(() => ({}))
+    : {};
   const decision = ctx.code_annee
     ? await api.get('/api/decisions/', { params: { mle_etudiant: mle, code_annee: ctx.code_annee } }).then(r => liste(r)[0]).catch(() => null)
     : null;
@@ -233,7 +240,20 @@ const generateBulletinSecondaire = async (etudiant, resultat, etabData, ctx) => 
   const ensDe = Object.fromEntries(cours.filter(c => !codeAnnee || c.code_annee === codeAnnee)
     .map(c => [c.code_matiere?.code_matiere || c.code_matiere, c.nom_ens]));
   const groupeDe = code => GROUPES_MATIERES.findIndex(g => !g.modules || g.modules.includes(moduleDe[code]));
-  const matieres = (resultat?.matieres || []).filter(m => m.poids !== null || m.moyenne !== null);
+  // Toutes les matières du programme de la classe : celles qui ont des notes, puis celles qui
+  // n'en ont pas encore (fiches non validées, devoirs non faits). Une matière non notée est
+  // affichée avec son coefficient mais ne compte pas dans la moyenne (règle de notes.py).
+  const notees = (resultat?.matieres || []).filter(m => m.poids !== null || m.moyenne !== null || m.dispense);
+  const vues = new Set(notees.map(m => m.code_matiere));
+  const nonNotees = [];
+  cours.filter(c => !codeAnnee || c.code_annee === codeAnnee).forEach(c => {
+    const code = c.code_matiere?.code_matiere || c.code_matiere;
+    if (vues.has(code)) return;
+    vues.add(code);
+    nonNotees.push({ code_matiere: code, lib_matiere: c.lib_matiere || code, moyenne: null,
+                     poids: coefsGrille[code] ?? null, nonNote: true });
+  });
+  const matieres = [...notees, ...nonNotees].sort((a, b) => a.lib_matiere.localeCompare(b.lib_matiere));
   const th = 'padding:3px 4px;border:1px solid #444;font-size:8.5px;background:#D6E4F0;';
   const td = 'padding:2px 4px;border:1px solid #444;font-size:9px;text-align:center;';
   const colsTitres = colonnes.map(c => `<th style="${th}">${(c.lib_periode || '').replace('Séquence ', 'Séq. ').replace('Trimestre ', 'Trim. ').replace(/ SEC$/, '')}</th>`).join('');
@@ -250,7 +270,8 @@ const generateBulletinSecondaire = async (etudiant, resultat, etabData, ctx) => 
       lignes += `<tr>
         <td style="${td}text-align:left;"><b>${m.lib_matiere}</b>${ensDe[m.code_matiere] ? `<div style="font-size:7.5px;color:#555;">${ensDe[m.code_matiere]}</div>` : ''}</td>
         ${colonnes.map((c, ci) => `<td style="${td}">${fmt(notesColonnes[ci][m.code_matiere])}</td>`).join('')}
-        <td style="${td}font-weight:700;color:${m.moyenne !== null && m.moyenne < 10 ? '#b71c1c' : '#111'};">${m.dispense ? 'ABS. J' : fmt(m.moyenne)}</td>
+        <td style="${td}font-weight:700;color:${m.moyenne !== null && m.moyenne < 10 ? '#b71c1c' : '#111'};">${
+          m.dispense ? 'ABS. J' : m.nonNote ? `<span style="font-weight:400;font-size:7.5px;color:#777;">${L('non noté', 'not graded')}</span>` : fmt(m.moyenne)}</td>
         <td style="${td}">${coef}</td>
         <td style="${td}">${fmt(total)}</td>
         <td style="${td}">${rangTxt(m.rang)}</td>
@@ -263,7 +284,7 @@ const generateBulletinSecondaire = async (etudiant, resultat, etabData, ctx) => 
       <td style="${td}text-align:left;font-size:8.5px;">${L(g.fr, g.en)}</td>
       ${colonnes.map(() => `<td style="${td}"></td>`).join('')}
       <td style="${td}">${coefG ? fmt(pointsG / coefG) : ''}</td><td style="${td}">${coefG || ''}</td>
-      <td style="${td}">${fmt(pointsG)}</td><td style="${td}" colspan="3"></td></tr>`;
+      <td style="${td}">${coefG ? fmt(pointsG) : ''}</td><td style="${td}" colspan="3"></td></tr>`;
   });
   const tableau = `
     <table style="width:100%;border-collapse:collapse;margin-top:6px;">
@@ -352,6 +373,10 @@ const generateBulletinSecondaire = async (etudiant, resultat, etabData, ctx) => 
       </div>
       ${identite}
       ${tableau}
+      ${nonNotees.length ? `<div style="font-size:8px;color:#555;margin-top:3px;font-style:italic;">
+        ${L('Non noté', 'Not graded')} : ${nonNotees.map(m => m.lib_matiere).join(', ')} —
+        ${L("pas encore de note validée sur la période ; ces matières ne comptent pas dans la moyenne.",
+            'no validated grade yet for the period; these subjects are not included in the average.')}</div>` : ''}
       <div style="display:flex;justify-content:space-between;gap:6px;margin-top:6px;">${discipline}${travail}${profil}</div>
       ${decisionBloc}
       ${signatures}
